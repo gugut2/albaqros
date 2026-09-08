@@ -19,6 +19,9 @@ interface CompactViewProps {
   onOpenCreateTask: () => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
   onUpdateEnergy: (dateStr: string, level: number) => void;
+  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
+  onAddSubtask?: (taskId: string, title: string) => void;
+  onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
 }
 
 export const CompactView: React.FC<CompactViewProps> = ({
@@ -35,6 +38,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onOpenCreateTask,
   onUpdateJournal,
   onUpdateEnergy,
+  onToggleSubtask,
+  onAddSubtask,
+  onDeleteSubtask,
 }) => {
   const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'low'>('all');
 
@@ -221,6 +227,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
               onToggleTopFocus={onToggleTopFocus}
               onDeleteTask={onDeleteTask}
               onRescueStaleTask={onRescueStaleTask}
+              onToggleSubtask={onToggleSubtask}
+              onAddSubtask={onAddSubtask}
+              onDeleteSubtask={onDeleteSubtask}
             />
           </div>
         )}
@@ -236,6 +245,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
             onToggleTopFocus={onToggleTopFocus}
             onDeleteTask={onDeleteTask}
             onRescueStaleTask={onRescueStaleTask}
+            onToggleSubtask={onToggleSubtask}
+            onAddSubtask={onAddSubtask}
+            onDeleteSubtask={onDeleteSubtask}
           />
         ))}
 

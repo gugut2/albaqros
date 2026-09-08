@@ -453,6 +453,20 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     {/* Right: Theme + Edit & Delete buttons */}
                     {editingTaskId !== t.id && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        {t.subtasks && t.subtasks.length > 0 && (
+                          <span
+                            style={{
+                              fontSize: '0.675rem',
+                              color: '#818cf8',
+                              backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                              padding: '1px 5px',
+                              borderRadius: '3px',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {t.subtasks.filter((s) => s.completed).length}/{t.subtasks.length} subtasks
+                          </span>
+                        )}
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>#{t.theme}</span>
                         <button
                           type="button"

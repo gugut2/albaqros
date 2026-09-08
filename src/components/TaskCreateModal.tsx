@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, X, Zap, Coffee, Star, RotateCcw, Calendar, Check } from 'lucide-react';
-import { EnergyLevel, MajorTask, RecurrenceRule, RecurrenceType, Task } from '../types';
+import { Plus, X, Zap, Coffee, Star, RotateCcw, Calendar, Check, ListTree } from 'lucide-react';
+import { EnergyLevel, MajorTask, RecurrenceRule, RecurrenceType, Subtask, Task } from '../types';
 
 interface TaskCreateModalProps {
   isOpen: boolean;
@@ -32,6 +32,8 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   const [energy, setEnergy] = useState<EnergyLevel>('normal');
   const [isTopFocus, setIsTopFocus] = useState(false);
   const [notes, setNotes] = useState('');
+  const [subtasksList, setSubtasksList] = useState<string[]>([]);
+  const [newSubtaskInput, setNewSubtaskInput] = useState('');
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -45,6 +47,18 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   const [monthlyDay, setMonthlyDay] = useState<number>(1);
 
   if (!isOpen) return null;
+
+  const handleAddSubtaskItem = () => {
+    const trimmed = newSubtaskInput.trim();
+    if (trimmed) {
+      setSubtasksList((prev) => [...prev, trimmed]);
+      setNewSubtaskInput('');
+    }
+  };
+
+  const handleRemoveSubtaskItem = (index: number) => {
+    setSubtasksList((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +79,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
       };
     }
 
+    const generatedSubtasks: Subtask[] | undefined =
+      subtasksList.length > 0
+        ? subtasksList.map((stTitle, idx) => ({
+            id: `sub-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+            title: stTitle,
+            completed: false,
+          }))
+        : undefined;
+
     onAddTask({
       title: title.trim(),
       theme: theme.trim() || 'General',
@@ -74,6 +97,7 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
       date: currentDate,
       recurrence: recurrenceRule,
       majorTaskId: selectedMajorTaskId || undefined,
+      subtasks: generatedSubtasks,
       notes: notes.trim() || undefined,
     });
 
@@ -81,6 +105,8 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
     setTitle('');
     setSelectedMajorTaskId('');
     setNotes('');
+    setSubtasksList([]);
+    setNewSubtaskInput('');
     setIsTopFocus(false);
     setIsRecurring(false);
     setIsCreatingTheme(false);
@@ -410,6 +436,106 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                 {isTopFocus ? 'Pinned Focus ⭐' : 'Regular Task'}
               </button>
             </div>
+          </div>
+
+          {/* Subtasks / Checklist Section (Optional) */}
+          <div
+            style={{
+              padding: '12px',
+              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <ListTree size={14} color="#818cf8" />
+                <span style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  SUBTASKS / CHECKLIST (OPTIONAL)
+                </span>
+              </div>
+              {subtasksList.length > 0 && (
+                <span style={{ fontSize: '0.7rem', color: '#818cf8', fontWeight: 600 }}>
+                  {subtasksList.length} subtask{subtasksList.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '6px', marginBottom: subtasksList.length > 0 ? '8px' : '0' }}>
+              <input
+                type="text"
+                placeholder="Add subtask step (press Enter)..."
+                value={newSubtaskInput}
+                onChange={(e) => setNewSubtaskInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddSubtaskItem();
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '6px 10px',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-primary)',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddSubtaskItem}
+                disabled={!newSubtaskInput.trim()}
+                className="btn-secondary"
+                style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+              >
+                <Plus size={12} /> Add
+              </button>
+            </div>
+
+            {subtasksList.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  maxHeight: '130px',
+                  overflowY: 'auto',
+                  padding: '4px 6px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                {subtasksList.map((st, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-primary)',
+                      padding: '3px 6px',
+                    }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{idx + 1}.</span>
+                      {st}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSubtaskItem(idx)}
+                      className="btn-icon"
+                      style={{ padding: '2px', color: 'var(--text-muted)' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Recurrence Config Section */}

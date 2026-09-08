@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { AppData, AppSettings, DayEntry, MajorTask, Task } from './types';
+import { AppData, AppSettings, DayEntry, MajorTask, Subtask, Task } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { processDayRollover } from './services/recurrence';
 import { TitleBar } from './components/TitleBar';
@@ -104,10 +104,102 @@ export const App: React.FC = () => {
               // Ignore if canvas unavailable
             }
           }
+
+          // If task has subtasks, update all subtasks to match parent
+          const updatedSubtasks = t.subtasks?.map((s) => ({
+            ...s,
+            completed: nextCompleted,
+          }));
+
           return {
             ...t,
             completed: nextCompleted,
             completedAt: nextCompleted ? new Date().toISOString() : undefined,
+            subtasks: updatedSubtasks,
+          };
+        }
+        return t;
+      });
+      return { ...prev, tasks: updatedTasks };
+    });
+  };
+
+  const handleToggleSubtask = (taskId: string, subtaskId: string) => {
+    updateData((prev) => {
+      let shouldCelebrate = false;
+      const updatedTasks = prev.tasks.map((t) => {
+        if (t.id === taskId && t.subtasks) {
+          const nextSubtasks = t.subtasks.map((s) =>
+            s.id === subtaskId ? { ...s, completed: !s.completed } : s
+          );
+
+          const allDone = nextSubtasks.length > 0 && nextSubtasks.every((s) => s.completed);
+          const wasAllDone = t.subtasks.every((s) => s.completed);
+
+          if (allDone && !wasAllDone) {
+            shouldCelebrate = true;
+          }
+
+          return {
+            ...t,
+            subtasks: nextSubtasks,
+            completed: allDone ? true : (t.completed && nextSubtasks.some((s) => !s.completed) ? false : t.completed),
+            completedAt: allDone ? new Date().toISOString() : t.completedAt,
+          };
+        }
+        return t;
+      });
+
+      if (shouldCelebrate) {
+        try {
+          confetti({
+            particleCount: 30,
+            spread: 50,
+            origin: { y: 0.8 },
+            colors: ['#6366f1', '#10b981', '#38bdf8', '#facc15'],
+          });
+        } catch (e) {}
+      }
+
+      return { ...prev, tasks: updatedTasks };
+    });
+  };
+
+  const handleAddSubtask = (taskId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    updateData((prev) => {
+      const updatedTasks = prev.tasks.map((t) => {
+        if (t.id === taskId) {
+          const newSubtask: Subtask = {
+            id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            title: trimmed,
+            completed: false,
+          };
+          const currentSubtasks = t.subtasks || [];
+          return {
+            ...t,
+            subtasks: [...currentSubtasks, newSubtask],
+            // Adding a new incomplete subtask reopens the task
+            completed: false,
+          };
+        }
+        return t;
+      });
+      return { ...prev, tasks: updatedTasks };
+    });
+  };
+
+  const handleDeleteSubtask = (taskId: string, subtaskId: string) => {
+    updateData((prev) => {
+      const updatedTasks = prev.tasks.map((t) => {
+        if (t.id === taskId && t.subtasks) {
+          const nextSubtasks = t.subtasks.filter((s) => s.id !== subtaskId);
+          const allDone = nextSubtasks.length > 0 && nextSubtasks.every((s) => s.completed);
+          return {
+            ...t,
+            subtasks: nextSubtasks,
+            completed: allDone ? true : t.completed,
           };
         }
         return t;
@@ -517,6 +609,9 @@ export const App: React.FC = () => {
             onOpenCreateTask={() => setIsCreateOpen(true)}
             onUpdateJournal={handleUpdateJournal}
             onUpdateEnergy={handleUpdateEnergy}
+            onToggleSubtask={handleToggleSubtask}
+            onAddSubtask={handleAddSubtask}
+            onDeleteSubtask={handleDeleteSubtask}
           />
         ) : (
           <MaximizedView
@@ -548,6 +643,9 @@ export const App: React.FC = () => {
             onDeleteMajorTask={handleDeleteMajorTask}
             onToggleCompleteMajorTask={handleToggleCompleteMajorTask}
             onAddTaskToMajor={handleAddTaskToMajor}
+            onToggleSubtask={handleToggleSubtask}
+            onAddSubtask={handleAddSubtask}
+            onDeleteSubtask={handleDeleteSubtask}
           />
         )}
       </div>

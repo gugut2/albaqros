@@ -45,6 +45,9 @@ interface MaximizedViewProps {
   onDeleteMajorTask?: (majorTaskId: string) => void;
   onToggleCompleteMajorTask?: (majorTaskId: string) => void;
   onAddTaskToMajor?: (majorTaskId: string, title: string, theme: string) => void;
+  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
+  onAddSubtask?: (taskId: string, title: string) => void;
+  onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
 }
 
 type StudioTab = 'today' | 'major' | 'analytics' | 'history' | 'recurring';
@@ -72,6 +75,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onDeleteMajorTask,
   onToggleCompleteMajorTask,
   onAddTaskToMajor,
+  onToggleSubtask,
+  onAddSubtask,
+  onDeleteSubtask,
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('today');
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
@@ -359,6 +365,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                       onToggleTopFocus={onToggleTopFocus}
                       onDeleteTask={onDeleteTask}
                       onRescueStaleTask={onRescueStaleTask}
+                      onToggleSubtask={onToggleSubtask}
+                      onAddSubtask={onAddSubtask}
+                      onDeleteSubtask={onDeleteSubtask}
                     />
                   </div>
                 )}
@@ -375,6 +384,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                       onToggleTopFocus={onToggleTopFocus}
                       onDeleteTask={onDeleteTask}
                       onRescueStaleTask={onRescueStaleTask}
+                      onToggleSubtask={onToggleSubtask}
+                      onAddSubtask={onAddSubtask}
+                      onDeleteSubtask={onDeleteSubtask}
                     />
                   ))}
 

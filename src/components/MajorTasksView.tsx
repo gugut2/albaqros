@@ -354,7 +354,20 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                           </span>
                         </div>
 
-                        <div style={{ display: 'flex', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          {t.subtasks && t.subtasks.length > 0 && (
+                            <span
+                              style={{
+                                color: '#818cf8',
+                                fontWeight: 600,
+                                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                                padding: '1px 5px',
+                                borderRadius: '3px',
+                              }}
+                            >
+                              {t.subtasks.filter((s) => s.completed).length}/{t.subtasks.length} subtasks
+                            </span>
+                          )}
                           <span>{formatDateLabel(t.date)}</span>
                           {t.energy === 'high' && <span style={{ color: '#f87171' }}>⚡</span>}
                           {t.energy === 'low' && <span style={{ color: '#34d399' }}>☕</span>}

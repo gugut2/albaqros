@@ -38,6 +38,11 @@ Albaqros is a local-first desktop productivity application built with **Electron
 - **Energy Intensity Tagging**:
   - `⚡ High Focus`: Cognitively demanding tasks or intense work.
   - `☕ Light Chore`: Quick wins, routine admin, and low-friction chores.
+- **Subtasks & Interactive Checklists**:
+  - Add subtask steps during task creation or directly on any active task card on the fly.
+  - Expandable nested checklist with mini checkboxes, strikethrough text, and quick `+ Add subtask` input.
+  - Visual completion badge (e.g. `2/3 subtasks (67%)`) and micro progress bar.
+  - Seamless auto-completion: completing all subtasks automatically completes the parent task with confetti! Toggling the parent checkbox synchronously completes or reopens all nested subtasks.
 - **"X Days Missed" Rollover & Stale Task Rescue**:
   - Uncompleted tasks carry forward with a subtle `Missed Xd` warning badge.
   - 1-click rescue modal provides healthy escape routes:
