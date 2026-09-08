@@ -48,6 +48,24 @@ export interface Task {
   archived?: boolean;
 }
 
+export type ProjectArtifactType = 'image' | 'audio' | '3d' | 'file';
+
+export interface ProjectArtifact {
+  id: string;
+  majorTaskId: string;
+  title: string;
+  type: ProjectArtifactType;
+  filePath?: string; // Absolute path on disk
+  fileName?: string;
+  fileSize?: number; // Size in bytes
+  fileExtension?: string; // e.g. .png, .blend, .wav
+  dataUrl?: string; // Base64 data URL for instant image/audio preview in UI
+  thumbnailUrl?: string; // Optional cover / render image
+  notes?: string; // Creative reflection, critique, techniques practiced
+  createdAt: string; // ISO date string
+  milestoneNumber?: number; // e.g. 1 for Piece #1, 2 for Piece #2
+}
+
 export interface MajorTask {
   id: string;
   title: string;
@@ -58,6 +76,8 @@ export interface MajorTask {
   createdAt: string;
   targetDate?: string; // Optional target completion date YYYY-MM-DD
   color?: string;
+  cadenceDays?: number; // Target deliverable cadence in days (e.g. every 7 days)
+  artifacts?: ProjectArtifact[]; // Creative deliverables / milestones
 }
 
 export interface DayEntry {

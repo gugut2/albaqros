@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { AppData, AppSettings, DayEntry, MajorTask, Subtask, Task } from './types';
+import { AppData, AppSettings, DayEntry, MajorTask, Subtask, Task, ProjectArtifact } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { processDayRollover } from './services/recurrence';
 import { TitleBar } from './components/TitleBar';
@@ -10,6 +10,7 @@ import { TaskCreateModal } from './components/TaskCreateModal';
 import { StaleRescueModal } from './components/StaleRescueModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MajorTaskModal } from './components/MajorTaskModal';
+import { ProjectArtifactModal } from './components/ProjectArtifactModal';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<AppData | null>(null);
@@ -23,6 +24,9 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMajorModalOpen, setIsMajorModalOpen] = useState<boolean>(false);
   const [editingMajorTask, setEditingMajorTask] = useState<MajorTask | null>(null);
+  const [isArtifactModalOpen, setIsArtifactModalOpen] = useState<boolean>(false);
+  const [artifactModalMajorTaskId, setArtifactModalMajorTaskId] = useState<string | null>(null);
+  const [editingArtifact, setEditingArtifact] = useState<ProjectArtifact | null>(null);
 
   // Load data on startup and process day rollover
   useEffect(() => {
@@ -404,6 +408,71 @@ export const App: React.FC = () => {
     }));
   };
 
+  // --- Project Milestone Deliverables & Creative Files Handlers ---
+
+  const handleOpenAddArtifact = (majorTaskId: string) => {
+    setArtifactModalMajorTaskId(majorTaskId);
+    setEditingArtifact(null);
+    setIsArtifactModalOpen(true);
+  };
+
+  const handleEditArtifact = (majorTaskId: string, artifact: ProjectArtifact) => {
+    setArtifactModalMajorTaskId(majorTaskId);
+    setEditingArtifact(artifact);
+    setIsArtifactModalOpen(true);
+  };
+
+  const handleSaveArtifact = (artifactData: Omit<ProjectArtifact, 'id'>, existingId?: string) => {
+    updateData((prev) => {
+      const targetMajorId = artifactData.majorTaskId;
+      const updatedMajorTasks = (prev.majorTasks || []).map((m) => {
+        if (m.id === targetMajorId) {
+          const currentArtifacts = m.artifacts || [];
+          if (existingId) {
+            const nextArtifacts = currentArtifacts.map((a) =>
+              a.id === existingId ? { ...artifactData, id: existingId } : a
+            );
+            return { ...m, artifacts: nextArtifacts };
+          } else {
+            const newArtifact: ProjectArtifact = {
+              ...artifactData,
+              id: `art-${Date.now()}`,
+            };
+            try {
+              confetti({
+                particleCount: 45,
+                spread: 70,
+                origin: { y: 0.65 },
+                colors: ['#6366f1', '#10b981', '#ec4899', '#facc15', '#38bdf8'],
+              });
+            } catch (e) {}
+            return { ...m, artifacts: [...currentArtifacts, newArtifact] };
+          }
+        }
+        return m;
+      });
+      return { ...prev, majorTasks: updatedMajorTasks };
+    });
+    setIsArtifactModalOpen(false);
+    setEditingArtifact(null);
+    setArtifactModalMajorTaskId(null);
+  };
+
+  const handleDeleteArtifact = (majorTaskId: string, artifactId: string) => {
+    updateData((prev) => {
+      const updatedMajorTasks = (prev.majorTasks || []).map((m) => {
+        if (m.id === majorTaskId && m.artifacts) {
+          return {
+            ...m,
+            artifacts: m.artifacts.filter((a) => a.id !== artifactId),
+          };
+        }
+        return m;
+      });
+      return { ...prev, majorTasks: updatedMajorTasks };
+    });
+  };
+
   // --- Stale Rescue Actions ---
 
   const handleBreakDownTask = (taskId: string, steps: string[]) => {
@@ -646,6 +715,9 @@ export const App: React.FC = () => {
             onToggleSubtask={handleToggleSubtask}
             onAddSubtask={handleAddSubtask}
             onDeleteSubtask={handleDeleteSubtask}
+            onOpenAddArtifact={handleOpenAddArtifact}
+            onEditArtifact={handleEditArtifact}
+            onDeleteArtifact={handleDeleteArtifact}
           />
         )}
       </div>
@@ -672,6 +744,27 @@ export const App: React.FC = () => {
         editingMajorTask={editingMajorTask}
         themes={data.customThemes || ['Work', 'Health', 'Chores', 'Personal']}
       />
+
+      {/* Project Milestone Deliverable / Creative File Modal */}
+      {isArtifactModalOpen && artifactModalMajorTaskId && (
+        <ProjectArtifactModal
+          isOpen={isArtifactModalOpen}
+          onClose={() => {
+            setIsArtifactModalOpen(false);
+            setEditingArtifact(null);
+            setArtifactModalMajorTaskId(null);
+          }}
+          onSaveArtifact={handleSaveArtifact}
+          majorTaskId={artifactModalMajorTaskId}
+          majorTaskTitle={
+            data.majorTasks?.find((m) => m.id === artifactModalMajorTaskId)?.title || 'Major Goal'
+          }
+          existingArtifact={editingArtifact}
+          defaultMilestoneNumber={
+            (data.majorTasks?.find((m) => m.id === artifactModalMajorTaskId)?.artifacts?.length || 0) + 1
+          }
+        />
+      )}
 
       {/* Stale Task Rescue Modal */}
       <StaleRescueModal

@@ -11,10 +11,17 @@ import {
   Check,
   Sparkles,
   Calendar,
+  Image as ImageIcon,
+  Box,
+  Music,
+  FileText,
+  Layers,
+  CheckSquare,
 } from 'lucide-react';
-import { MajorTask, Task } from '../types';
-import { calculateMajorTaskProgress } from '../services/majorTasks';
+import { MajorTask, Task, ProjectArtifact } from '../types';
+import { calculateMajorTaskProgress, calculateCadenceStatus, formatFileSize } from '../services/majorTasks';
 import { formatDateLabel, getTodayString } from '../services/storage';
+import { EvolutionGallery } from './EvolutionGallery';
 
 interface MajorTasksViewProps {
   majorTasks: MajorTask[];
@@ -26,6 +33,9 @@ interface MajorTasksViewProps {
   onToggleCompleteMajorTask: (majorTaskId: string) => void;
   onToggleCompleteTask: (taskId: string) => void;
   onAddTaskToMajor: (majorTaskId: string, title: string, theme: string) => void;
+  onOpenAddArtifact: (majorTaskId: string) => void;
+  onEditArtifact: (majorTaskId: string, artifact: ProjectArtifact) => void;
+  onDeleteArtifact: (majorTaskId: string, artifactId: string) => void;
 }
 
 export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
@@ -38,8 +48,12 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
   onToggleCompleteMajorTask,
   onToggleCompleteTask,
   onAddTaskToMajor,
+  onOpenAddArtifact,
+  onEditArtifact,
+  onDeleteArtifact,
 }) => {
   const [expandedMajorId, setExpandedMajorId] = useState<string | null>(majorTasks[0]?.id || null);
+  const [activeSubTab, setActiveSubTab] = useState<{ [majorId: string]: 'tasks' | 'evolution' }>({});
   const [newTaskTitle, setNewTaskTitle] = useState<{ [majorId: string]: string }>({});
 
   const handleQuickAddTask = (majorTask: MajorTask) => {
@@ -87,6 +101,8 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {majorTasks.map((major) => {
           const progress = calculateMajorTaskProgress(major, allTasks);
+          const cadence = calculateCadenceStatus(major);
+          const currentTab = activeSubTab[major.id] || 'tasks';
           const isExpanded = expandedMajorId === major.id;
           const isFinished = major.completed || progress.percentage === 100;
 
@@ -129,6 +145,34 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                       }}
                     >
                       <Calendar size={12} /> Target: {formatDateLabel(major.targetDate)}
+                    </span>
+                  )}
+
+                  {cadence.hasCadence && (
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        color:
+                          cadence.status === 'due_today'
+                            ? '#fbbf24'
+                            : cadence.status === 'overdue'
+                            ? '#f87171'
+                            : '#818cf8',
+                        backgroundColor:
+                          cadence.status === 'due_today'
+                            ? 'rgba(245, 158, 11, 0.15)'
+                            : cadence.status === 'overdue'
+                            ? 'rgba(248, 113, 113, 0.15)'
+                            : 'rgba(99, 102, 241, 0.12)',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      <Clock size={11} /> {cadence.badgeText}
                     </span>
                   )}
 
@@ -247,138 +291,310 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                 </div>
               </div>
 
-              {/* Toggle to view / add associated daily tasks */}
-              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setExpandedMajorId(isExpanded ? null : major.id)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--accent-indigo)',
-                    fontSize: '0.775rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  <span>
-                    {isExpanded ? 'Hide Associated Tasks' : `View ${progress.total} Linked Tasks & Add Actions`}
-                  </span>
-                </button>
-
-                {/* Expanded Tasks & Quick Add */}
-                {isExpanded && (
-                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {/* Quick Add Daily Task directly linked to this Major Task */}
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
-                      <input
-                        type="text"
-                        placeholder="Add next actionable step for this major goal..."
-                        value={newTaskTitle[major.id] || ''}
-                        onChange={(e) =>
-                          setNewTaskTitle((prev) => ({ ...prev, [major.id]: e.target.value }))
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleQuickAddTask(major);
-                          }
-                        }}
-                        style={{
-                          flex: 1,
-                          backgroundColor: 'var(--bg-input)',
-                          border: '1px solid var(--border-medium)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '6px 10px',
-                          fontSize: '0.8rem',
-                          color: 'var(--text-primary)',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleQuickAddTask(major)}
-                        disabled={!(newTaskTitle[major.id] || '').trim()}
-                        className="btn-primary"
-                        style={{ fontSize: '0.75rem', padding: '6px 12px' }}
-                      >
-                        <Plus size={13} /> Add Task
-                      </button>
+              {/* Evolution Deliverable Preview Strip (if artifacts exist or cadence is set) */}
+              <div
+                style={{
+                  marginTop: '14px',
+                  padding: '10px 14px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* Thumbnails of up to 4 recent artifacts */}
+                  {major.artifacts && major.artifacts.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {major.artifacts.slice(-4).map((art) => (
+                        <div
+                          key={art.id}
+                          onClick={() => {
+                            setExpandedMajorId(major.id);
+                            setActiveSubTab((prev) => ({ ...prev, [major.id]: 'evolution' }));
+                          }}
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '6px',
+                            overflow: 'hidden',
+                            backgroundColor: '#0a0d13',
+                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            flexShrink: 0,
+                          }}
+                          title={`Piece #${art.milestoneNumber || 1}: ${art.title}`}
+                        >
+                          {art.type === 'image' && art.dataUrl ? (
+                            <img src={art.dataUrl} alt={art.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : art.type === '3d' && art.thumbnailUrl ? (
+                            <img src={art.thumbnailUrl} alt={art.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : art.type === '3d' ? (
+                            <Box size={14} color="#c084fc" />
+                          ) : art.type === 'audio' ? (
+                            <Music size={14} color="#fbbf24" />
+                          ) : (
+                            <FileText size={14} color="#818cf8" />
+                          )}
+                        </div>
+                      ))}
                     </div>
+                  ) : null}
 
-                    {/* Associated tasks list */}
-                    {progress.associatedTasks.map((t) => (
-                      <div
-                        key={t.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 12px',
-                          borderRadius: 'var(--radius-md)',
-                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                  <div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Sparkles size={13} color="#818cf8" />
+                      <span>{major.artifacts?.length ? `${major.artifacts.length} Milestones Logged` : 'Creative Evolution Tracker'}</span>
+                      {major.cadenceDays && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          • Every {major.cadenceDays}d
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      {major.artifacts?.length
+                        ? 'Click to view progression timeline & project files'
+                        : 'Track finished concept art, 3D files, & audio over time'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenAddArtifact(major.id)}
+                    className="btn-secondary"
+                    style={{ fontSize: '0.725rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Plus size={12} /> Log Piece
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isExpanded) {
+                        setExpandedMajorId(major.id);
+                        setActiveSubTab((prev) => ({ ...prev, [major.id]: 'evolution' }));
+                      } else {
+                        setActiveSubTab((prev) => ({
+                          ...prev,
+                          [major.id]: currentTab === 'evolution' ? 'tasks' : 'evolution',
+                        }));
+                      }
+                    }}
+                    style={{
+                      background: 'none',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      color: '#818cf8',
+                      fontSize: '0.725rem',
+                      padding: '4px 10px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {isExpanded && currentTab === 'evolution' ? 'Show Study Tasks' : 'Open Evolution Studio'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Collapsible Section: Study Tasks vs Evolution Hub */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  {/* Subtab Toggle Buttons */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedMajorId(major.id);
+                        setActiveSubTab((prev) => ({ ...prev, [major.id]: 'tasks' }));
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.775rem',
+                        fontWeight: currentTab === 'tasks' && isExpanded ? 600 : 500,
+                        backgroundColor: currentTab === 'tasks' && isExpanded ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                        color: currentTab === 'tasks' && isExpanded ? '#ffffff' : 'var(--text-secondary)',
+                        border: currentTab === 'tasks' && isExpanded ? '1px solid var(--accent-indigo)' : '1px solid transparent',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <CheckSquare size={13} />
+                      <span>Daily Study & Action Tasks ({progress.total})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedMajorId(major.id);
+                        setActiveSubTab((prev) => ({ ...prev, [major.id]: 'evolution' }));
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.775rem',
+                        fontWeight: currentTab === 'evolution' && isExpanded ? 600 : 500,
+                        backgroundColor: currentTab === 'evolution' && isExpanded ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                        color: currentTab === 'evolution' && isExpanded ? '#ffffff' : 'var(--text-secondary)',
+                        border: currentTab === 'evolution' && isExpanded ? '1px solid var(--accent-indigo)' : '1px solid transparent',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <Layers size={13} />
+                      <span>Evolution Gallery & Files ({major.artifacts?.length || 0})</span>
+                    </button>
+                  </div>
+
+                  {/* Collapse / Expand chevron */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMajorId(isExpanded ? null : major.id)}
+                    className="btn-icon"
+                    style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}
+                    title={isExpanded ? 'Collapse' : 'Expand'}
+                  >
+                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                </div>
+
+                {/* Expanded Content Area */}
+                {isExpanded && (
+                  <div style={{ marginTop: '14px' }}>
+                    {/* TAB 1: Daily Study Tasks Checklist */}
+                    {currentTab === 'tasks' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {/* Quick Add Daily Task directly linked to this Major Task */}
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                          <input
+                            type="text"
+                            placeholder="Add next actionable study/practice task (e.g. 30m anatomy study)..."
+                            value={newTaskTitle[major.id] || ''}
+                            onChange={(e) =>
+                              setNewTaskTitle((prev) => ({ ...prev, [major.id]: e.target.value }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleQuickAddTask(major);
+                              }
+                            }}
+                            style={{
+                              flex: 1,
+                              backgroundColor: 'var(--bg-input)',
+                              border: '1px solid var(--border-medium)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '6px 10px',
+                              fontSize: '0.8rem',
+                              color: 'var(--text-primary)',
+                            }}
+                          />
                           <button
                             type="button"
-                            onClick={() => onToggleCompleteTask(t.id)}
+                            onClick={() => handleQuickAddTask(major)}
+                            disabled={!(newTaskTitle[major.id] || '').trim()}
+                            className="btn-primary"
+                            style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+                          >
+                            <Plus size={13} /> Add Task
+                          </button>
+                        </div>
+
+                        {/* Associated tasks list */}
+                        {progress.associatedTasks.map((t) => (
+                          <div
+                            key={t.id}
                             style={{
-                              width: '16px',
-                              height: '16px',
-                              borderRadius: '4px',
-                              backgroundColor: t.completed ? 'var(--accent-emerald)' : 'transparent',
-                              border: t.completed ? '1px solid var(--accent-emerald)' : '1px solid var(--border-medium)',
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              color: '#ffffff',
-                              flexShrink: 0,
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: 'var(--radius-md)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid var(--border-subtle)',
                             }}
                           >
-                            {t.completed && <Check size={11} strokeWidth={3} />}
-                          </button>
-                          <span
-                            style={{
-                              fontSize: '0.825rem',
-                              color: t.completed ? 'var(--text-muted)' : 'var(--text-primary)',
-                              textDecoration: t.completed ? 'line-through' : 'none',
-                            }}
-                          >
-                            {t.title}
-                          </span>
-                        </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                              <button
+                                type="button"
+                                onClick={() => onToggleCompleteTask(t.id)}
+                                style={{
+                                  width: '16px',
+                                  height: '16px',
+                                  borderRadius: '4px',
+                                  backgroundColor: t.completed ? 'var(--accent-emerald)' : 'transparent',
+                                  border: t.completed ? '1px solid var(--accent-emerald)' : '1px solid var(--border-medium)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer',
+                                  color: '#ffffff',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {t.completed && <Check size={11} strokeWidth={3} />}
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: '0.825rem',
+                                  color: t.completed ? 'var(--text-muted)' : 'var(--text-primary)',
+                                  textDecoration: t.completed ? 'line-through' : 'none',
+                                }}
+                              >
+                                {t.title}
+                              </span>
+                            </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          {t.subtasks && t.subtasks.length > 0 && (
-                            <span
-                              style={{
-                                color: '#818cf8',
-                                fontWeight: 600,
-                                backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                                padding: '1px 5px',
-                                borderRadius: '3px',
-                              }}
-                            >
-                              {t.subtasks.filter((s) => s.completed).length}/{t.subtasks.length} subtasks
-                            </span>
-                          )}
-                          <span>{formatDateLabel(t.date)}</span>
-                          {t.energy === 'high' && <span style={{ color: '#f87171' }}>⚡</span>}
-                          {t.energy === 'low' && <span style={{ color: '#34d399' }}>☕</span>}
-                        </div>
-                      </div>
-                    ))}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {t.subtasks && t.subtasks.length > 0 && (
+                                <span
+                                  style={{
+                                    color: '#818cf8',
+                                    fontWeight: 600,
+                                    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                  }}
+                                >
+                                  {t.subtasks.filter((s) => s.completed).length}/{t.subtasks.length} subtasks
+                                </span>
+                              )}
+                              <span>{formatDateLabel(t.date)}</span>
+                              {t.energy === 'high' && <span style={{ color: '#f87171' }}>⚡</span>}
+                              {t.energy === 'low' && <span style={{ color: '#34d399' }}>☕</span>}
+                            </div>
+                          </div>
+                        ))}
 
-                    {progress.associatedTasks.length === 0 && (
-                      <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)', padding: '8px' }}>
-                        No daily tasks linked yet. Type an actionable task above or link tasks when creating them!
+                        {progress.associatedTasks.length === 0 && (
+                          <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)', padding: '8px' }}>
+                            No daily study tasks linked yet. Type an actionable task above to start practicing!
+                          </div>
+                        )}
                       </div>
+                    )}
+
+                    {/* TAB 2: Evolution Gallery & Creative Files */}
+                    {currentTab === 'evolution' && (
+                      <EvolutionGallery
+                        majorTask={major}
+                        onOpenAddArtifact={() => onOpenAddArtifact(major.id)}
+                        onEditArtifact={(art) => onEditArtifact(major.id, art)}
+                        onDeleteArtifact={(artId) => onDeleteArtifact(major.id, artId)}
+                      />
                     )}
                   </div>
                 )}

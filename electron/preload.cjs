@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
   setAutoLaunch: (enable) => ipcRenderer.invoke('set-auto-launch', enable),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+  selectProjectFile: () => ipcRenderer.invoke('select-project-file'),
+  selectCoverImage: () => ipcRenderer.invoke('select-cover-image'),
+  openExternalFile: (filePath) => ipcRenderer.invoke('open-external-file', filePath),
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
   onExternalDataChange: (callback) => {
     ipcRenderer.on('external-data-change', () => callback());
   },

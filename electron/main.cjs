@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -257,6 +257,132 @@ ipcMain.handle('set-auto-launch', (_, enable) => {
 
 ipcMain.handle('get-auto-launch', () => {
   return app.getLoginItemSettings().openAtLogin;
+});
+
+// Creative Project Files & Milestone Deliverables IPCs
+ipcMain.handle('select-project-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Milestone Deliverable / Project File',
+    properties: ['openFile'],
+    filters: [
+      {
+        name: 'All Creative Assets',
+        extensions: [
+          'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg',
+          'blend', 'obj', 'fbx', 'gltf', 'glb', 'stl', 'c4d', 'max', 'ma', 'mb',
+          'wav', 'mp3', 'ogg', 'flac', 'm4a', 'aac', 'aif', 'aiff',
+          'psd', 'clip', 'kra', 'procreate', 'flp', 'als', 'logic', 'prproj', 'aep', 'pdf', 'zip'
+        ]
+      },
+      { name: 'Images & Concept Art', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] },
+      { name: '3D Projects & Models', extensions: ['blend', 'obj', 'fbx', 'gltf', 'glb', 'stl', 'c4d', 'max', 'ma', 'mb', 'step', 'dae'] },
+      { name: 'Audio, Music & SFX', extensions: ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'aac', 'aif', 'aiff'] },
+      { name: 'Creative Project Files', extensions: ['psd', 'clip', 'kra', 'procreate', 'flp', 'als', 'logic', 'prproj', 'aep'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const filePath = result.filePaths[0];
+  const fileName = path.basename(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  let fileSize = 0;
+  try {
+    const stats = fs.statSync(filePath);
+    fileSize = stats.size;
+  } catch (err) {
+    console.error('Error stating file:', err);
+  }
+
+  const imageExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg'];
+  const threeDExts = ['.blend', '.obj', '.fbx', '.gltf', '.glb', '.stl', '.c4d', '.max', '.ma', '.mb', '.step', '.dae'];
+  const audioExts = ['.wav', '.mp3', '.ogg', '.flac', '.m4a', '.aac', '.aif', '.aiff'];
+
+  let detectedType = 'file';
+  if (imageExts.includes(ext)) detectedType = 'image';
+  else if (threeDExts.includes(ext)) detectedType = '3d';
+  else if (audioExts.includes(ext)) detectedType = 'audio';
+
+  // For images and audio under 30MB, read into base64 Data URL for instant in-app preview/playback
+  let dataUrl = undefined;
+  if ((detectedType === 'image' || detectedType === 'audio') && fileSize < 30 * 1024 * 1024) {
+    try {
+      const mimeTypes = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.bmp': 'image/bmp',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.flac': 'audio/flac',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+      };
+      const mime = mimeTypes[ext] || (detectedType === 'image' ? 'image/png' : 'audio/mpeg');
+      const buffer = fs.readFileSync(filePath);
+      dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    } catch (err) {
+      console.error('Error generating data URL for file:', err);
+    }
+  }
+
+  return {
+    filePath,
+    fileName,
+    fileSize,
+    fileExtension: ext,
+    detectedType,
+    dataUrl,
+  };
+});
+
+ipcMain.handle('select-cover-image', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Render or Cover Thumbnail',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  const ext = path.extname(filePath).toLowerCase();
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('open-external-file', async (_, filePath) => {
+  if (!filePath) return false;
+  try {
+    await shell.openPath(filePath);
+    return true;
+  } catch (err) {
+    console.error('Failed to open external file:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('show-item-in-folder', (_, filePath) => {
+  if (!filePath) return false;
+  try {
+    shell.showItemInFolder(filePath);
+    return true;
+  } catch (err) {
+    console.error('Failed to show item in folder:', err);
+    return false;
+  }
 });
 
 app.whenReady().then(() => {

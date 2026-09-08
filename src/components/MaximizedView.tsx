@@ -13,7 +13,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
-import { AppData, DayEntry, MajorTask, Task } from '../types';
+import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
 import { JournalSection } from './JournalSection';
 import { AnalyticsView } from './AnalyticsView';
@@ -48,6 +48,9 @@ interface MaximizedViewProps {
   onToggleSubtask?: (taskId: string, subtaskId: string) => void;
   onAddSubtask?: (taskId: string, title: string) => void;
   onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
+  onOpenAddArtifact?: (majorTaskId: string) => void;
+  onEditArtifact?: (majorTaskId: string, artifact: ProjectArtifact) => void;
+  onDeleteArtifact?: (majorTaskId: string, artifactId: string) => void;
 }
 
 type StudioTab = 'today' | 'major' | 'analytics' | 'history' | 'recurring';
@@ -78,6 +81,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
+  onOpenAddArtifact,
+  onEditArtifact,
+  onDeleteArtifact,
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('today');
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
@@ -444,6 +450,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             onToggleCompleteMajorTask={onToggleCompleteMajorTask || (() => {})}
             onToggleCompleteTask={onToggleComplete}
             onAddTaskToMajor={onAddTaskToMajor || (() => {})}
+            onOpenAddArtifact={onOpenAddArtifact || (() => {})}
+            onEditArtifact={onEditArtifact || (() => {})}
+            onDeleteArtifact={onDeleteArtifact || (() => {})}
           />
         )}
 

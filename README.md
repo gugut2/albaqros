@@ -23,13 +23,22 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 2. 🎯 Major Projects & Milestones
-- **Macro-to-Micro Alignment**: Create high-level projects (e.g., *“Launch v1 MVP”*, *“Half-Marathon Training”*, *“Apartment Renovation”*) and link individual daily tasks directly to them.
+### 2. 🎯 Major Projects, Creative Evolution & Project Files Hub
+- **Macro-to-Micro Alignment**: Create high-level projects (e.g., *“Learn Concept Art”*, *“3D Character Modeling”*, *“Produce EP Album”*, *“Apartment Renovation”*) and link individual daily study/practice tasks directly to them.
 - **Dynamic Real-Time Progress**:
   $$\text{Progress \%} = \text{round}\left(\frac{\text{Completed Associated Tasks}}{\text{Total Associated Tasks}} \times 100\right)$$
   Progress bars and percentage counters update instantly upon checking off daily tasks.
-- **Milestone Cards**: Expand any major goal to inspect all linked tasks across past and upcoming dates, with 1-click inline task addition.
-- **Linked Task Badges**: Connected tasks display an interactive `🎯 [Goal Name] (XX%)` badge across both compact and studio views.
+- **Creative Deliverable Cadence**:
+  - Configure a milestone frequency: e.g. *“Create a milestone project every 7 days”*.
+  - Live cadence tracker displays days since last submission, countdowns (`Next piece due in 3 days`), and overdue alerts.
+- **Multi-Media Deliverables & File Tracking**:
+  - **Concept Art & Images**: Chronological thumbnail gallery, hover zoom, and full-screen high-res Lightbox.
+  - **3D Projects** (`.blend`, `.obj`, `.fbx`, `.gltf`): Poly-cube badges, render covers, and 1-click **"Open in Blender / 3D App"** and **"Show in Explorer"** buttons.
+  - **Music & Audio / SFX** (`.wav`, `.mp3`, `.ogg`, `.flac`): Built-in custom dark-mode audio player with play/pause, timestamps, scrubber, and DAW launcher.
+  - **Creative Project Files** (`.psd`, `.clip`, `.als`, `.flp`, `.zip`): Local file path linking and 1-click launch.
+  - **Self-Critique & Reflections**: Capture techniques learned, challenges faced, and self-critiques on every piece.
+- **Side-by-Side Evolution Comparison**:
+  - Select any two milestone pieces (e.g. *Piece #1 Day 1 Study* vs *Piece #6 Day 35 Finished Art*) to inspect before-and-after visual progression and celebrate your tangible creative growth over time.
 
 ---
 

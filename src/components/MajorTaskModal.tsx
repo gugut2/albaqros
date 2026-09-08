@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, X, Calendar, Plus, Check } from 'lucide-react';
+import { Target, X, Calendar, Plus, Check, Sparkles, Clock } from 'lucide-react';
 import { MajorTask } from '../types';
 
 interface MajorTaskModalProps {
@@ -21,6 +21,7 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
   const [description, setDescription] = useState('');
   const [theme, setTheme] = useState(themes[0] || 'Work');
   const [targetDate, setTargetDate] = useState('');
+  const [cadenceDays, setCadenceDays] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (editingMajorTask) {
@@ -28,11 +29,13 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
       setDescription(editingMajorTask.description || '');
       setTheme(editingMajorTask.theme || themes[0] || 'Work');
       setTargetDate(editingMajorTask.targetDate || '');
+      setCadenceDays(editingMajorTask.cadenceDays);
     } else {
       setTitle('');
       setDescription('');
       setTheme(themes[0] || 'Work');
       setTargetDate('');
+      setCadenceDays(undefined);
     }
   }, [editingMajorTask, isOpen, themes]);
 
@@ -48,6 +51,7 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
         description: description.trim() || undefined,
         theme,
         targetDate: targetDate || undefined,
+        cadenceDays: cadenceDays && cadenceDays > 0 ? cadenceDays : undefined,
       },
       editingMajorTask?.id
     );
@@ -224,6 +228,77 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
                   <X size={14} />
                 </button>
               )}
+            </div>
+          </div>
+
+          {/* Creative Deliverable Cadence */}
+          <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.04)', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+              <Clock size={14} color="#818cf8" />
+              <label style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                DELIVERABLE / EVOLUTION CADENCE (OPTIONAL)
+              </label>
+            </div>
+            <p style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.4 }}>
+              e.g. For concept art or 3D, complete a finished project piece every X days to track your evolution over time.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Every</span>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 7"
+                  value={cadenceDays || ''}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setCadenceDays(isNaN(val) || val <= 0 ? undefined : val);
+                  }}
+                  style={{
+                    width: '64px',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '5px 8px',
+                    fontSize: '0.825rem',
+                    color: 'var(--text-primary)',
+                    textAlign: 'center',
+                  }}
+                />
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>days</span>
+              </div>
+
+              {/* Quick Presets */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                {[
+                  { days: undefined, label: 'None' },
+                  { days: 3, label: '3d' },
+                  { days: 7, label: 'Weekly (7d)' },
+                  { days: 14, label: 'Bi-weekly (14d)' },
+                  { days: 30, label: 'Monthly (30d)' },
+                ].map((preset) => {
+                  const isMatch = cadenceDays === preset.days;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setCadenceDays(preset.days)}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '0.7rem',
+                        fontWeight: isMatch ? 600 : 400,
+                        backgroundColor: isMatch ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isMatch ? '1px solid #6366f1' : '1px solid var(--border-subtle)',
+                        color: isMatch ? '#ffffff' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
