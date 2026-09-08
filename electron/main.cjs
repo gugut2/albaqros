@@ -1,11 +1,17 @@
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+app.setName('Albaqros');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.albaqros.app');
+}
 
 let mainWindow = null;
 let isCompact = false;
 let customStoragePath = '';
 let fileWatcher = null;
+let tray = null;
 
 const DEFAULT_DATA_FILENAME = 'productivity-data.json';
 
@@ -43,16 +49,72 @@ function setupFileWatcher(filePath) {
   }
 }
 
+function setupTray() {
+  if (tray) return;
+  const trayIconPath = path.join(__dirname, '../assets/tray.png');
+  const fallbackIconPath = path.join(__dirname, '../assets/icon.png');
+  const actualTrayIcon = fs.existsSync(trayIconPath) ? trayIconPath : fallbackIconPath;
+
+  if (fs.existsSync(actualTrayIcon)) {
+    try {
+      tray = new Tray(actualTrayIcon);
+      tray.setToolTip('Albaqros - Daily Tasks & Reflection Companion');
+
+      const contextMenu = Menu.buildFromTemplate([
+        {
+          label: 'Open Albaqros',
+          click: () => {
+            if (mainWindow) {
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show();
+              mainWindow.focus();
+            }
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit Albaqros',
+          click: () => {
+            app.isQuitting = true;
+            app.quit();
+          },
+        },
+      ]);
+
+      tray.setContextMenu(contextMenu);
+      tray.on('click', () => {
+        if (mainWindow) {
+          if (mainWindow.isVisible()) {
+            if (mainWindow.isMinimized()) {
+              mainWindow.restore();
+            }
+            mainWindow.focus();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Error creating tray:', err);
+    }
+  }
+}
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  const iconPath = path.join(__dirname, '../assets/icon.png');
 
   mainWindow = new BrowserWindow({
+    title: 'Albaqros',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     width: 420,
     height: 680,
     minWidth: 380,
     minHeight: 550,
     frame: false,
+    skipTaskbar: false, // Ensures Albaqros displays in the Windows taskbar
     transparent: false,
     backgroundColor: '#0b0d11',
     hasShadow: true,
@@ -68,11 +130,15 @@ function createWindow() {
   isCompact = true;
   mainWindow.setPosition(screenWidth - 440, Math.max(40, Math.floor((screenHeight - 680) / 2)));
 
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  const distPath = path.join(__dirname, '../dist/index.html');
+  const isDev = Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development');
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
+  } else if (fs.existsSync(distPath)) {
+    mainWindow.loadFile(distPath);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadURL('http://localhost:5173');
   }
 
   // Initial file watch
@@ -195,6 +261,7 @@ ipcMain.handle('get-auto-launch', () => {
 
 app.whenReady().then(() => {
   createWindow();
+  setupTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
