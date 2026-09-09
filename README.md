@@ -2,6 +2,11 @@
 
 > **A sleek, minimalist desktop companion for day-to-day task execution, habit recurrence, and reflective journaling.**
 
+[![Release](https://img.shields.io/github/v/release/gugut2/albaqros?color=6366f1&label=Download%20Installer)](https://github.com/gugut2/albaqros/releases/latest)
+[![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/gugut2/albaqros/releases/latest)
+
+📥 **[Download Latest Installer (Albaqros Setup v1.0.0)](https://github.com/gugut2/albaqros/releases/download/v1.0.0/Albaqros.Setup.1.0.0.exe)**
+
 Albaqros is a local-first desktop productivity application built with **Electron**, **React**, **Vite**, and **TypeScript**. It balances deep-focus daily execution with high-level milestone progress, historical reflection, and visual analytics in a tailored dark-mode interface.
 
 ---
