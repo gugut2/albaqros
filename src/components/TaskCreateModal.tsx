@@ -1,11 +1,25 @@
-import React, { useState } from 'react';
-import { Plus, X, Zap, Coffee, Star, RotateCcw, Calendar, Check, ListTree } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Plus,
+  X,
+  Zap,
+  Coffee,
+  Star,
+  RotateCcw,
+  Calendar,
+  Check,
+  ListTree,
+  Edit3,
+  CalendarClock,
+} from 'lucide-react';
 import { EnergyLevel, MajorTask, RecurrenceRule, RecurrenceType, Subtask, Task } from '../types';
 
-interface TaskCreateModalProps {
+export interface TaskCreateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddTask: (taskData: Omit<Task, 'id' | 'createdAt' | 'daysMissed'>) => void;
+  onAddTask?: (taskData: Omit<Task, 'id' | 'createdAt' | 'daysMissed'>) => void;
+  onSaveTask?: (taskData: Omit<Task, 'id' | 'createdAt' | 'daysMissed'>, existingId?: string) => void;
+  editingTask?: Task | null;
   currentDate: string;
   themes?: string[];
   onAddTheme?: (theme: string) => void;
@@ -19,6 +33,8 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   isOpen,
   onClose,
   onAddTask,
+  onSaveTask,
+  editingTask,
   currentDate,
   themes = DEFAULT_THEMES,
   onAddTheme,
@@ -31,9 +47,12 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   const [isCreatingTheme, setIsCreatingTheme] = useState(false);
   const [energy, setEnergy] = useState<EnergyLevel>('normal');
   const [isTopFocus, setIsTopFocus] = useState(false);
+  const [taskDate, setTaskDate] = useState(currentDate);
   const [notes, setNotes] = useState('');
-  const [subtasksList, setSubtasksList] = useState<string[]>([]);
+  const [subtasksList, setSubtasksList] = useState<Subtask[]>([]);
   const [newSubtaskInput, setNewSubtaskInput] = useState('');
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [isMultiDay, setIsMultiDay] = useState(false);
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -46,18 +65,95 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   const [cycleStartDate, setCycleStartDate] = useState<string>(currentDate);
   const [monthlyDay, setMonthlyDay] = useState<number>(1);
 
+  // Sync state with editingTask or defaults when modal opens
+  useEffect(() => {
+    if (editingTask) {
+      setTitle(editingTask.title);
+      setSelectedMajorTaskId(editingTask.majorTaskId || '');
+      setTheme(editingTask.theme || themes[0] || 'Work');
+      setEnergy(editingTask.energy || 'normal');
+      setIsTopFocus(Boolean(editingTask.isTopFocus));
+      setTaskDate(editingTask.date || currentDate);
+      setNotes(editingTask.notes || '');
+      setSubtasksList(
+        editingTask.subtasks ? editingTask.subtasks.map((s) => ({ ...s })) : []
+      );
+      setIsCompleted(Boolean(editingTask.completed));
+      setIsMultiDay(Boolean(editingTask.isMultiDay));
+
+      if (editingTask.recurrence?.isRecurring) {
+        setIsRecurring(true);
+        setRecurrenceType(editingTask.recurrence.type || 'cycle');
+        setSelectedDays(editingTask.recurrence.daysOfWeek || [1, 3, 5]);
+        setIntervalDays(editingTask.recurrence.intervalDays || 4);
+        setTimesPerWeek(editingTask.recurrence.timesPerWeek || 3);
+        setActiveDays(editingTask.recurrence.activeDays || 3);
+        setSkipDays(editingTask.recurrence.skipDays || 1);
+        setCycleStartDate(
+          editingTask.recurrence.cycleStartDate || editingTask.date || currentDate
+        );
+        setMonthlyDay(editingTask.recurrence.monthlyDay || 1);
+      } else {
+        setIsRecurring(false);
+        setRecurrenceType('cycle');
+        setSelectedDays([1, 3, 5]);
+        setIntervalDays(4);
+        setTimesPerWeek(3);
+        setActiveDays(3);
+        setSkipDays(1);
+        setCycleStartDate(currentDate);
+        setMonthlyDay(1);
+      }
+    } else {
+      // Create mode reset
+      setTitle('');
+      setSelectedMajorTaskId('');
+      setTheme(themes[0] || 'Work');
+      setEnergy('normal');
+      setIsTopFocus(false);
+      setTaskDate(currentDate);
+      setNotes('');
+      setSubtasksList([]);
+      setIsCompleted(false);
+      setIsMultiDay(false);
+      setIsRecurring(false);
+      setRecurrenceType('cycle');
+      setSelectedDays([1, 3, 5]);
+      setIntervalDays(4);
+      setTimesPerWeek(3);
+      setActiveDays(3);
+      setSkipDays(1);
+      setCycleStartDate(currentDate);
+      setMonthlyDay(1);
+    }
+    setIsCreatingTheme(false);
+    setCustomThemeInput('');
+    setNewSubtaskInput('');
+  }, [editingTask, isOpen, currentDate, themes]);
+
   if (!isOpen) return null;
 
   const handleAddSubtaskItem = () => {
     const trimmed = newSubtaskInput.trim();
     if (trimmed) {
-      setSubtasksList((prev) => [...prev, trimmed]);
+      const newSubtask: Subtask = {
+        id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: trimmed,
+        completed: false,
+      };
+      setSubtasksList((prev) => [...prev, newSubtask]);
       setNewSubtaskInput('');
     }
   };
 
-  const handleRemoveSubtaskItem = (index: number) => {
-    setSubtasksList((prev) => prev.filter((_, i) => i !== index));
+  const handleToggleSubtaskInModal = (subtaskId: string) => {
+    setSubtasksList((prev) =>
+      prev.map((s) => (s.id === subtaskId ? { ...s, completed: !s.completed } : s))
+    );
+  };
+
+  const handleRemoveSubtaskItem = (subtaskId: string) => {
+    setSubtasksList((prev) => prev.filter((s) => s.id !== subtaskId));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -79,38 +175,26 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
       };
     }
 
-    const generatedSubtasks: Subtask[] | undefined =
-      subtasksList.length > 0
-        ? subtasksList.map((stTitle, idx) => ({
-            id: `sub-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-            title: stTitle,
-            completed: false,
-          }))
-        : undefined;
-
-    onAddTask({
+    const taskPayload = {
       title: title.trim(),
       theme: theme.trim() || 'General',
       energy,
       isTopFocus,
-      completed: false,
-      date: currentDate,
+      completed: editingTask ? isCompleted : false,
+      date: taskDate || currentDate,
       recurrence: recurrenceRule,
       majorTaskId: selectedMajorTaskId || undefined,
-      subtasks: generatedSubtasks,
+      subtasks: subtasksList.length > 0 ? subtasksList : undefined,
       notes: notes.trim() || undefined,
-    });
+      isMultiDay,
+    };
 
-    // Reset and close
-    setTitle('');
-    setSelectedMajorTaskId('');
-    setNotes('');
-    setSubtasksList([]);
-    setNewSubtaskInput('');
-    setIsTopFocus(false);
-    setIsRecurring(false);
-    setIsCreatingTheme(false);
-    setCustomThemeInput('');
+    if (onSaveTask) {
+      onSaveTask(taskPayload, editingTask?.id);
+    } else if (onAddTask) {
+      onAddTask(taskPayload);
+    }
+
     onClose();
   };
 
@@ -154,7 +238,7 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
         className="glass-panel animate-fade-in"
         style={{
           width: '100%',
-          maxWidth: '480px',
+          maxWidth: '500px',
           padding: '24px',
           backgroundColor: '#12161f',
           border: '1px solid var(--border-medium)',
@@ -165,23 +249,34 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '16px',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div
               style={{
                 width: '28px',
                 height: '28px',
                 borderRadius: '6px',
-                backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                backgroundColor: editingTask
+                  ? 'rgba(56, 189, 248, 0.15)'
+                  : 'rgba(99, 102, 241, 0.15)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#818cf8',
+                color: editingTask ? '#38bdf8' : '#818cf8',
               }}
             >
-              <Plus size={16} />
+              {editingTask ? <Edit3 size={16} /> : <Plus size={16} />}
             </div>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>Create New Task</h3>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              {editingTask ? 'Edit Task' : 'Create New Task'}
+            </h3>
           </div>
           <button type="button" onClick={onClose} className="btn-icon">
             <X size={16} />
@@ -191,7 +286,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Title Input */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.775rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                marginBottom: '6px',
+              }}
+            >
               TASK TITLE
             </label>
             <input
@@ -212,9 +315,68 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
             />
           </div>
 
+          {/* Scheduled Date */}
+          <div>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.775rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                marginBottom: '6px',
+              }}
+            >
+              SCHEDULED DATE
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type="date"
+                  value={taskDate}
+                  onChange={(e) => setTaskDate(e.target.value)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '8px 12px',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-primary)',
+                  }}
+                />
+              </div>
+              {taskDate !== currentDate && (
+                <button
+                  type="button"
+                  onClick={() => setTaskDate(currentDate)}
+                  style={{
+                    background: 'rgba(99, 102, 241, 0.1)',
+                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    color: '#a5b4fc',
+                    fontSize: '0.725rem',
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Set to Today
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Theme Selection */}
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '6px',
+              }}
+            >
               <label style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                 THEME / FACET
               </label>
@@ -329,7 +491,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
           {/* Link to Major Goal / Project (Optional) */}
           {majorTasks && majorTasks.length > 0 && (
             <div>
-              <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.775rem',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
                 LINK TO MAJOR PROJECT / GOAL (OPTIONAL)
               </label>
               <select
@@ -359,7 +529,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             {/* Energy Level */}
             <div>
-              <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.775rem',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
                 ENERGY INTENSITY
               </label>
               <div style={{ display: 'flex', gap: '6px' }}>
@@ -410,7 +588,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
 
             {/* Top Focus Toggle */}
             <div>
-              <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.775rem',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
                 TODAY'S #1 FOCUS
               </label>
               <button
@@ -438,7 +624,95 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
             </div>
           </div>
 
-          {/* Subtasks / Checklist Section (Optional) */}
+          {/* Multi-Day Task Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 12px',
+              backgroundColor: isMultiDay ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: 'var(--radius-md)',
+              border: isMultiDay ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-subtle)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onClick={() => setIsMultiDay(!isMultiDay)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '6px',
+                  backgroundColor: isMultiDay ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isMultiDay ? '#818cf8' : 'var(--text-muted)',
+                }}
+              >
+                <CalendarClock size={16} />
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontSize: '0.825rem',
+                    fontWeight: 600,
+                    color: isMultiDay ? '#c7d2fe' : 'var(--text-primary)',
+                  }}
+                >
+                  Multi-Day Task
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '1px' }}>
+                  Completed subtasks carry over to the next day already marked as done
+                </div>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={isMultiDay}
+              onChange={(e) => setIsMultiDay(e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#6366f1' }}
+            />
+          </div>
+
+          {/* If editing existing task: Completion status toggle */}
+          {editingTask && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                backgroundColor: isCompleted ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                borderRadius: 'var(--radius-md)',
+                border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Check size={14} color={isCompleted ? '#34d399' : 'var(--text-muted)'} />
+                <span
+                  style={{
+                    fontSize: '0.825rem',
+                    fontWeight: 600,
+                    color: isCompleted ? '#34d399' : 'var(--text-secondary)',
+                  }}
+                >
+                  {isCompleted ? 'Task Marked as Completed' : 'Task Incomplete'}
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={isCompleted}
+                onChange={(e) => setIsCompleted(e.target.checked)}
+                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#10b981' }}
+              />
+            </div>
+          )}
+
+          {/* Subtasks / Checklist Section */}
           <div
             style={{
               padding: '12px',
@@ -447,7 +721,14 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '8px',
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <ListTree size={14} color="#818cf8" />
                 <span style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
@@ -456,7 +737,7 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
               </div>
               {subtasksList.length > 0 && (
                 <span style={{ fontSize: '0.7rem', color: '#818cf8', fontWeight: 600 }}>
-                  {subtasksList.length} subtask{subtasksList.length > 1 ? 's' : ''}
+                  {subtasksList.filter((s) => s.completed).length}/{subtasksList.length} completed
                 </span>
               )}
             </div>
@@ -500,7 +781,7 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px',
-                  maxHeight: '130px',
+                  maxHeight: '140px',
                   overflowY: 'auto',
                   padding: '4px 6px',
                   backgroundColor: 'rgba(0, 0, 0, 0.2)',
@@ -510,7 +791,7 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
               >
                 {subtasksList.map((st, idx) => (
                   <div
-                    key={idx}
+                    key={st.id || idx}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -520,15 +801,29 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                       padding: '3px 6px',
                     }}
                   >
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{idx + 1}.</span>
-                      {st}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={st.completed}
+                        onChange={() => handleToggleSubtaskInModal(st.id)}
+                        style={{ cursor: 'pointer', accentColor: '#10b981' }}
+                      />
+                      <span
+                        style={{
+                          textDecoration: st.completed ? 'line-through' : 'none',
+                          color: st.completed ? 'var(--text-muted)' : 'var(--text-primary)',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {st.title}
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => handleRemoveSubtaskItem(idx)}
+                      onClick={() => handleRemoveSubtaskItem(st.id)}
                       className="btn-icon"
                       style={{ padding: '2px', color: 'var(--text-muted)' }}
+                      title="Remove subtask"
                     >
                       <X size={12} />
                     </button>
@@ -536,6 +831,38 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Notes / Details Textarea */}
+          <div>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.775rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                marginBottom: '6px',
+              }}
+            >
+              NOTES / CONTEXT (OPTIONAL)
+            </label>
+            <textarea
+              placeholder="Add extra context, links, reflection, or notes..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              style={{
+                width: '100%',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-md)',
+                padding: '8px 12px',
+                fontSize: '0.85rem',
+                color: 'var(--text-primary)',
+                resize: 'vertical',
+                fontFamily: 'inherit',
+              }}
+            />
           </div>
 
           {/* Recurrence Config Section */}
@@ -547,7 +874,14 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isRecurring ? '12px' : 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: isRecurring ? '12px' : 0,
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <RotateCcw size={14} color="#818cf8" />
                 <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -613,7 +947,14 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                   >
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                       <div>
-                        <span style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        <span
+                          style={{
+                            fontSize: '0.725rem',
+                            color: 'var(--text-secondary)',
+                            display: 'block',
+                            marginBottom: '4px',
+                          }}
+                        >
                           Active for (Days on):
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -639,7 +980,14 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                       </div>
 
                       <div>
-                        <span style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        <span
+                          style={{
+                            fontSize: '0.725rem',
+                            color: 'var(--text-secondary)',
+                            display: 'block',
+                            marginBottom: '4px',
+                          }}
+                        >
                           Then skip (Days off):
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -665,7 +1013,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255, 255, 255, 0.06)', paddingTop: '8px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                        paddingTop: '8px',
+                      }}
+                    >
                       <span style={{ fontSize: '0.725rem', color: 'var(--text-secondary)' }}>
                         Cycle start anchor:
                       </span>
@@ -684,7 +1040,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                       />
                     </div>
 
-                    <div style={{ fontSize: '0.725rem', color: '#a5b4fc', backgroundColor: 'rgba(99, 102, 241, 0.1)', padding: '4px 8px', borderRadius: '4px' }}>
+                    <div
+                      style={{
+                        fontSize: '0.725rem',
+                        color: '#a5b4fc',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                      }}
+                    >
                       💡 Pattern: Active for {activeDays} days, followed by {skipDays} rest day(s). ({activeDays + skipDays}-day repeating cycle)
                     </div>
                   </div>
@@ -693,7 +1057,14 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                 {/* 2. Days of week selector */}
                 {recurrenceType === 'weekly_days' && (
                   <div>
-                    <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    <span
+                      style={{
+                        fontSize: '0.725rem',
+                        color: 'var(--text-muted)',
+                        display: 'block',
+                        marginBottom: '4px',
+                      }}
+                    >
                       Repeat on:
                     </span>
                     <div style={{ display: 'flex', gap: '4px' }}>
@@ -745,13 +1116,23 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                         fontSize: '0.825rem',
                       }}
                     />
-                    <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>days (e.g. 4 for plants, 14 for sheets)</span>
+                    <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>
+                      days (e.g. 4 for plants, 14 for sheets)
+                    </span>
                   </div>
                 )}
 
                 {/* 4. Weekdays Only */}
                 {recurrenceType === 'weekdays' && (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '6px 8px', backgroundColor: 'rgba(255, 255, 255, 0.02)', borderRadius: '4px' }}>
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      color: 'var(--text-secondary)',
+                      padding: '6px 8px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                      borderRadius: '4px',
+                    }}
+                  >
                     📅 Task will automatically activate Monday through Friday.
                   </div>
                 )}
@@ -777,7 +1158,9 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                         fontSize: '0.825rem',
                       }}
                     />
-                    <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>of each month (e.g. 1st or 15th)</span>
+                    <span style={{ fontSize: '0.775rem', color: 'var(--text-secondary)' }}>
+                      of each month (e.g. 1st or 15th)
+                    </span>
                   </div>
                 )}
               </div>
@@ -790,7 +1173,15 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
               Cancel
             </button>
             <button type="submit" className="btn-primary" disabled={!title.trim()}>
-              <Plus size={14} /> Add Task
+              {editingTask ? (
+                <>
+                  <Check size={14} /> Save Changes
+                </>
+              ) : (
+                <>
+                  <Plus size={14} /> Add Task
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -798,3 +1189,5 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
     </div>
   );
 };
+
+export const TaskModal = TaskCreateModal;

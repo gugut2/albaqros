@@ -21,6 +21,9 @@ interface CompactViewProps {
   onToggleTopFocus: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
   onRescueStaleTask: (task: Task) => void;
+  onEditTask?: (task: Task) => void;
+  onSendTaskToNextDay?: (taskId: string) => void;
+  onToggleMultiDay?: (taskId: string) => void;
   onOpenCreateTask: () => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
   onUpdateEnergy: (dateStr: string, level: number) => void;
@@ -51,6 +54,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onToggleTopFocus,
   onDeleteTask,
   onRescueStaleTask,
+  onEditTask,
+  onSendTaskToNextDay,
+  onToggleMultiDay,
   onOpenCreateTask,
   onUpdateJournal,
   onUpdateEnergy,
@@ -319,6 +325,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
               onToggleTopFocus={onToggleTopFocus}
               onDeleteTask={onDeleteTask}
               onRescueStaleTask={onRescueStaleTask}
+              onEditTask={onEditTask}
+              onSendTaskToNextDay={onSendTaskToNextDay}
+              onToggleMultiDay={onToggleMultiDay}
               onToggleSubtask={onToggleSubtask}
               onAddSubtask={onAddSubtask}
               onDeleteSubtask={onDeleteSubtask}
@@ -337,6 +346,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
             onToggleTopFocus={onToggleTopFocus}
             onDeleteTask={onDeleteTask}
             onRescueStaleTask={onRescueStaleTask}
+            onEditTask={onEditTask}
+            onSendTaskToNextDay={onSendTaskToNextDay}
+            onToggleMultiDay={onToggleMultiDay}
             onToggleSubtask={onToggleSubtask}
             onAddSubtask={onAddSubtask}
             onDeleteSubtask={onDeleteSubtask}

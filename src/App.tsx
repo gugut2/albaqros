@@ -25,6 +25,7 @@ export const App: React.FC = () => {
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [rescueTask, setRescueTask] = useState<Task | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMajorModalOpen, setIsMajorModalOpen] = useState<boolean>(false);
@@ -283,6 +284,57 @@ export const App: React.FC = () => {
         tasks: [newTask, ...existing],
       };
     });
+  };
+
+  const handleEditTask = (task: Task) => {
+    setEditingTask(task);
+    setIsCreateOpen(true);
+  };
+
+  const handleSaveTask = (
+    taskData: Omit<Task, 'id' | 'createdAt' | 'daysMissed'>,
+    existingId?: string
+  ) => {
+    if (existingId) {
+      updateData((prev) => {
+        const willBeTop = Boolean(taskData.isTopFocus);
+        const targetDate = taskData.date;
+
+        const updatedTasks = prev.tasks.map((t) => {
+          if (t.id === existingId) {
+            const wasCompleted = t.completed;
+            const nextCompleted = taskData.completed ?? wasCompleted;
+            let completedAt = t.completedAt;
+            if (nextCompleted && !wasCompleted) {
+              completedAt = new Date().toISOString();
+            } else if (!nextCompleted && wasCompleted) {
+              completedAt = undefined;
+            }
+
+            return {
+              ...t,
+              ...taskData,
+              completed: nextCompleted,
+              completedAt,
+              daysMissed: t.date !== targetDate ? 0 : t.daysMissed,
+            };
+          }
+          // If task became top focus, unpin other top focus on that date
+          if (willBeTop && t.date === targetDate && t.id !== existingId && t.isTopFocus) {
+            return { ...t, isTopFocus: false };
+          }
+          return t;
+        });
+
+        return {
+          ...prev,
+          tasks: updatedTasks,
+        };
+      });
+      setEditingTask(null);
+    } else {
+      handleAddTask(taskData);
+    }
   };
 
   const handleAddTheme = (newTheme: string) => {
@@ -556,6 +608,60 @@ export const App: React.FC = () => {
       ...prev,
       tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, daysMissed: 0 } : t)),
     }));
+    setRescueTask(null);
+  };
+
+  // --- Multi-Day Task Handlers ---
+
+  const handleSendTaskToNextDay = (taskId: string) => {
+    updateData((prev) => {
+      const target = prev.tasks.find((t) => t.id === taskId);
+      if (!target) return prev;
+
+      // Calculate next day from the task's date, or currentDate if not set
+      const baseDateStr = target.date || currentDate;
+      const [y, m, d] = baseDateStr.split('-').map(Number);
+      const nextDateObj = new Date(y, m - 1, d);
+      nextDateObj.setDate(nextDateObj.getDate() + 1);
+      const nextDateStr = `${nextDateObj.getFullYear()}-${String(nextDateObj.getMonth() + 1).padStart(2, '0')}-${String(nextDateObj.getDate()).padStart(2, '0')}`;
+
+      // Carries task to the next day, marked as multi-day, reset daysMissed,
+      // and preserves all completed subtasks exactly as done
+      const updatedTasks = prev.tasks.map((t) => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            date: nextDateStr,
+            isMultiDay: true,
+            daysMissed: 0,
+            completed: false, // Stays active for remaining subtasks
+            completedAt: undefined,
+          };
+        }
+        return t;
+      });
+
+      return {
+        ...prev,
+        tasks: updatedTasks,
+      };
+    });
+
+    setSyncNotice('⏩ Task carried to next day with completed subtasks preserved');
+    setTimeout(() => setSyncNotice(null), 3500);
+  };
+
+  const handleToggleMultiDay = (taskId: string) => {
+    updateData((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) =>
+        t.id === taskId ? { ...t, isMultiDay: !t.isMultiDay, daysMissed: 0 } : t
+      ),
+    }));
+  };
+
+  const handleConvertToMultiDay = (taskId: string) => {
+    handleSendTaskToNextDay(taskId);
     setRescueTask(null);
   };
 
@@ -957,7 +1063,13 @@ export const App: React.FC = () => {
             onToggleTopFocus={handleToggleTopFocus}
             onDeleteTask={handleDeleteTask}
             onRescueStaleTask={(task) => setRescueTask(task)}
-            onOpenCreateTask={() => setIsCreateOpen(true)}
+            onEditTask={handleEditTask}
+            onSendTaskToNextDay={handleSendTaskToNextDay}
+            onToggleMultiDay={handleToggleMultiDay}
+            onOpenCreateTask={() => {
+              setEditingTask(null);
+              setIsCreateOpen(true);
+            }}
             onUpdateJournal={handleUpdateJournal}
             onUpdateEnergy={handleUpdateEnergy}
             onToggleSubtask={handleToggleSubtask}
@@ -995,7 +1107,13 @@ export const App: React.FC = () => {
             onAddTaskToDate={handleAddTaskToDate}
             onDeleteDay={handleDeleteDay}
             onRescueStaleTask={(task) => setRescueTask(task)}
-            onOpenCreateTask={() => setIsCreateOpen(true)}
+            onEditTask={handleEditTask}
+            onSendTaskToNextDay={handleSendTaskToNextDay}
+            onToggleMultiDay={handleToggleMultiDay}
+            onOpenCreateTask={() => {
+              setEditingTask(null);
+              setIsCreateOpen(true);
+            }}
             onUpdateJournal={handleUpdateJournal}
             onUpdateEnergy={handleUpdateEnergy}
             onOpenSettings={() => setIsSettingsOpen(true)}
@@ -1033,11 +1151,15 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      {/* Task Creation Modal */}
+      {/* Task Creation & Edit Modal */}
       <TaskCreateModal
         isOpen={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onAddTask={handleAddTask}
+        onClose={() => {
+          setIsCreateOpen(false);
+          setEditingTask(null);
+        }}
+        onSaveTask={handleSaveTask}
+        editingTask={editingTask}
         currentDate={currentDate}
         themes={data.customThemes || ['Work', 'Health', 'Chores', 'Personal']}
         onAddTheme={handleAddTheme}
@@ -1085,6 +1207,7 @@ export const App: React.FC = () => {
         onDeferToWeekend={handleDeferToWeekend}
         onArchive={handleArchiveTask}
         onResetMissed={handleResetMissed}
+        onConvertToMultiDay={handleConvertToMultiDay}
       />
 
       {/* Settings & Cloud Sync Modal */}

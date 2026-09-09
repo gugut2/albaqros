@@ -28,6 +28,7 @@ interface HistoryViewProps {
   onUpdateEnergy: (dateStr: string, level: number) => void;
   onToggleComplete: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
+  onEditTask?: (task: Task) => void;
   onUpdateTaskTitle: (taskId: string, newTitle: string) => void;
   onAddTaskToDate: (dateStr: string, title: string, theme: string) => void;
   onDeleteDay: (dateStr: string) => void;
@@ -44,6 +45,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onUpdateEnergy,
   onToggleComplete,
   onDeleteTask,
+  onEditTask,
   onUpdateTaskTitle,
   onAddTaskToDate,
   onDeleteDay,
@@ -712,9 +714,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>#{t.theme}</span>
                         <button
                           type="button"
-                          onClick={() => handleStartEditTask(t)}
+                          onClick={() => {
+                            if (onEditTask) {
+                              onEditTask(t);
+                            } else {
+                              handleStartEditTask(t);
+                            }
+                          }}
                           className="btn-icon"
-                          title="Edit Task Title"
+                          title="Edit Task"
                           style={{ padding: '4px' }}
                         >
                           <Edit2 size={12} />

@@ -182,12 +182,12 @@ export function processDayRollover(tasks: Task[], lastOpenedDate: string): Task[
     }
 
     // If it was scheduled on an earlier date and remained incomplete,
-    // roll it over to today and increment daysMissed
+    // roll it over to today. Multi-day tasks carry over without daysMissed penalty.
     if (task.date < today) {
       return {
         ...task,
         date: today,
-        daysMissed: (task.daysMissed || 0) + diffDays,
+        daysMissed: task.isMultiDay ? 0 : (task.daysMissed || 0) + diffDays,
       };
     }
 

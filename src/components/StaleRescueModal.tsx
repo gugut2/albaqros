@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, Scissors, Calendar, CheckSquare, X } from 'lucide-react';
+import { AlertTriangle, Scissors, Calendar, CheckSquare, X, CalendarClock } from 'lucide-react';
 import { Task } from '../types';
 
 interface StaleRescueModalProps {
@@ -9,6 +9,7 @@ interface StaleRescueModalProps {
   onDeferToWeekend: (taskId: string) => void;
   onArchive: (taskId: string) => void;
   onResetMissed: (taskId: string) => void;
+  onConvertToMultiDay?: (taskId: string) => void;
 }
 
 export const StaleRescueModal: React.FC<StaleRescueModalProps> = ({
@@ -18,6 +19,7 @@ export const StaleRescueModal: React.FC<StaleRescueModalProps> = ({
   onDeferToWeekend,
   onArchive,
   onResetMissed,
+  onConvertToMultiDay,
 }) => {
   const [breakdownMode, setBreakdownMode] = useState(false);
   const [substep1, setSubstep1] = useState('');
@@ -171,6 +173,37 @@ export const StaleRescueModal: React.FC<StaleRescueModalProps> = ({
                 </div>
               </div>
             </button>
+
+            {/* Option 3: Convert to Multi-Day & Carry to Tomorrow */}
+            {onConvertToMultiDay && (
+              <button
+                type="button"
+                onClick={() => onConvertToMultiDay(task.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '12px 14px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.borderColor = '#818cf8')}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.borderColor = 'rgba(99, 102, 241, 0.25)')}
+              >
+                <CalendarClock size={18} color="#818cf8" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Convert to Multi-Day & Carry to Tomorrow</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Keep all completed progress and continue smoothly without stale warnings.
+                  </div>
+                </div>
+              </button>
+            )}
 
             {/* Option 3: Let it go / Archive */}
             <button

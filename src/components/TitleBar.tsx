@@ -1,5 +1,6 @@
 import React from 'react';
 import { Minus, X, Maximize2, Minimize2, Pin, Sparkles, Folder } from 'lucide-react';
+import albaqrosLogo from '../../assets/icon.png';
 
 interface TitleBarProps {
   isCompact: boolean;
@@ -53,20 +54,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           gap: '8px',
         }}
       >
-        <div
+        <img
+          src={albaqrosLogo}
+          alt="Albaqros"
           style={{
-            width: '18px',
-            height: '18px',
+            width: '20px',
+            height: '20px',
             borderRadius: '5px',
-            background: 'linear-gradient(135deg, #6366f1, #06b6d4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 0 10px rgba(99, 102, 241, 0.4)',
+            objectFit: 'cover',
+            boxShadow: '0 0 10px rgba(99, 102, 241, 0.35)',
+            flexShrink: 0,
+            display: 'block',
           }}
-        >
-          <Sparkles size={11} color="#ffffff" />
-        </div>
+        />
         <span
           style={{
             fontSize: '0.825rem',

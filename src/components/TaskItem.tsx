@@ -13,6 +13,9 @@ import {
   ListTree,
   Plus,
   X,
+  Edit2,
+  CalendarClock,
+  CalendarPlus,
 } from 'lucide-react';
 import { MajorTask, Task } from '../types';
 import { getRecurrenceDescription } from '../services/recurrence';
@@ -26,6 +29,9 @@ interface TaskItemProps {
   onToggleTopFocus: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
   onRescueStaleTask: (task: Task) => void;
+  onEditTask?: (task: Task) => void;
+  onSendTaskToNextDay?: (taskId: string) => void;
+  onToggleMultiDay?: (taskId: string) => void;
   onToggleSubtask?: (taskId: string, subtaskId: string) => void;
   onAddSubtask?: (taskId: string, title: string) => void;
   onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
@@ -39,6 +45,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   onToggleTopFocus,
   onDeleteTask,
   onRescueStaleTask,
+  onEditTask,
+  onSendTaskToNextDay,
+  onToggleMultiDay,
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
@@ -84,6 +93,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
         position: 'relative',
         overflow: 'hidden',
       }}
+      onDoubleClick={() => onEditTask?.(task)}
     >
       {/* Top Focus Accent Glow Bar */}
       {task.isTopFocus && (
@@ -302,6 +312,34 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 </span>
               )}
 
+              {/* Multi-Day Badge */}
+              {task.isMultiDay && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleMultiDay?.(task.id);
+                  }}
+                  title="Multi-day task: completed subtasks carry over to next day. Click to toggle."
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    fontSize: '0.675rem',
+                    fontWeight: 600,
+                    color: '#c7d2fe',
+                    backgroundColor: 'rgba(99, 102, 241, 0.18)',
+                    border: '1px solid rgba(99, 102, 241, 0.35)',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    cursor: onToggleMultiDay ? 'pointer' : 'default',
+                  }}
+                >
+                  <CalendarClock size={9} />
+                  <span>Multi-Day</span>
+                </button>
+              )}
+
               {/* Missed Days Badge (Clickable for Stale Rescue) */}
               {isMissed && (
                 <button
@@ -351,6 +389,38 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           >
             <Star size={14} fill={task.isTopFocus ? '#facc15' : 'transparent'} />
           </button>
+
+          {/* Send to Next Day (Multi-Day Carry Over) */}
+          {onSendTaskToNextDay && !task.completed && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSendTaskToNextDay(task.id);
+              }}
+              title="Send to Next Day (all completed subtasks stay done)"
+              className="btn-icon"
+              style={{
+                color: task.isMultiDay ? '#818cf8' : 'var(--text-muted)',
+                padding: '5px',
+              }}
+            >
+              <CalendarPlus size={13} />
+            </button>
+          )}
+
+          {/* Edit Task */}
+          {onEditTask && (
+            <button
+              type="button"
+              onClick={() => onEditTask(task)}
+              title="Edit Task"
+              className="btn-icon"
+              style={{ color: 'var(--text-muted)', padding: '5px' }}
+            >
+              <Edit2 size={13} />
+            </button>
+          )}
 
           {/* Delete Task */}
           <button

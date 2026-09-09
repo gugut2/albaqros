@@ -32,6 +32,7 @@ interface MajorTasksViewProps {
   onDeleteMajorTask: (majorTaskId: string) => void;
   onToggleCompleteMajorTask: (majorTaskId: string) => void;
   onToggleCompleteTask: (taskId: string) => void;
+  onEditTask?: (task: Task) => void;
   onAddTaskToMajor: (majorTaskId: string, title: string, theme: string) => void;
   onOpenAddArtifact: (majorTaskId: string) => void;
   onEditArtifact: (majorTaskId: string, artifact: ProjectArtifact) => void;
@@ -47,6 +48,7 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
   onDeleteMajorTask,
   onToggleCompleteMajorTask,
   onToggleCompleteTask,
+  onEditTask,
   onAddTaskToMajor,
   onOpenAddArtifact,
   onEditArtifact,
@@ -575,6 +577,17 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                               <span>{formatDateLabel(t.date)}</span>
                               {t.energy === 'high' && <span style={{ color: '#f87171' }}>⚡</span>}
                               {t.energy === 'low' && <span style={{ color: '#34d399' }}>☕</span>}
+                              {onEditTask && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditTask(t)}
+                                  className="btn-icon"
+                                  title="Edit Task"
+                                  style={{ padding: '2px 4px', color: 'var(--text-muted)' }}
+                                >
+                                  <Edit2 size={12} />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}

@@ -46,6 +46,7 @@ export interface Task {
   majorTaskId?: string; // ID of linked Major Task / Project
   notes?: string;
   archived?: boolean;
+  isMultiDay?: boolean; // Spans multiple days; completed subtasks carry over to next day
 }
 
 export type ProjectArtifactType = 'image' | 'audio' | '3d' | 'file';

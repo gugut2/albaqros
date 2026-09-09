@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Sparkles,
   Target,
+  Edit2,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -38,6 +39,9 @@ interface MaximizedViewProps {
   onAddTaskToDate: (dateStr: string, title: string, theme: string) => void;
   onDeleteDay: (dateStr: string) => void;
   onRescueStaleTask: (task: Task) => void;
+  onEditTask?: (task: Task) => void;
+  onSendTaskToNextDay?: (taskId: string) => void;
+  onToggleMultiDay?: (taskId: string) => void;
   onOpenCreateTask: () => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
   onUpdateEnergy: (dateStr: string, level: number) => void;
@@ -78,6 +82,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onAddTaskToDate,
   onDeleteDay,
   onRescueStaleTask,
+  onEditTask,
+  onSendTaskToNextDay,
+  onToggleMultiDay,
   onOpenCreateTask,
   onUpdateJournal,
   onUpdateEnergy,
@@ -398,6 +405,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                       onToggleTopFocus={onToggleTopFocus}
                       onDeleteTask={onDeleteTask}
                       onRescueStaleTask={onRescueStaleTask}
+                      onEditTask={onEditTask}
+                      onSendTaskToNextDay={onSendTaskToNextDay}
+                      onToggleMultiDay={onToggleMultiDay}
                       onToggleSubtask={onToggleSubtask}
                       onAddSubtask={onAddSubtask}
                       onDeleteSubtask={onDeleteSubtask}
@@ -417,6 +427,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                       onToggleTopFocus={onToggleTopFocus}
                       onDeleteTask={onDeleteTask}
                       onRescueStaleTask={onRescueStaleTask}
+                      onEditTask={onEditTask}
+                      onSendTaskToNextDay={onSendTaskToNextDay}
+                      onToggleMultiDay={onToggleMultiDay}
                       onToggleSubtask={onToggleSubtask}
                       onAddSubtask={onAddSubtask}
                       onDeleteSubtask={onDeleteSubtask}
@@ -494,6 +507,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             onDeleteMajorTask={onDeleteMajorTask || (() => {})}
             onToggleCompleteMajorTask={onToggleCompleteMajorTask || (() => {})}
             onToggleCompleteTask={onToggleComplete}
+            onEditTask={onEditTask}
             onAddTaskToMajor={onAddTaskToMajor || (() => {})}
             onOpenAddArtifact={onOpenAddArtifact || (() => {})}
             onEditArtifact={onEditArtifact || (() => {})}
@@ -519,6 +533,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             onUpdateEnergy={onUpdateEnergy}
             onToggleComplete={onToggleComplete}
             onDeleteTask={onDeleteTask}
+            onEditTask={onEditTask}
             onUpdateTaskTitle={onUpdateTaskTitle}
             onAddTaskToDate={onAddTaskToDate}
             onDeleteDay={onDeleteDay}
@@ -595,6 +610,17 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                     <span className="badge badge-energy-low">
                       {t.energy === 'high' ? '⚡ High Focus' : '☕ Light Chore'}
                     </span>
+                    {onEditTask && (
+                      <button
+                        type="button"
+                        onClick={() => onEditTask(t)}
+                        className="btn-icon"
+                        title="Edit Recurring Chore"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', fontSize: '0.75rem' }}
+                      >
+                        <Edit2 size={12} /> Edit
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onDeleteTask(t.id)}
