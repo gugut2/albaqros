@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveData: (data) => ipcRenderer.invoke('save-data', data),
   selectStorageDirectory: () => ipcRenderer.invoke('select-storage-directory'),
   getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
+  getVaultInfo: () => ipcRenderer.invoke('vault-get-info'),
+  selectVaultDirectory: () => ipcRenderer.invoke('vault-select-existing'),
+  createNewVault: (vaultName, parentPath, initialData) =>
+    ipcRenderer.invoke('vault-create-new', { vaultName, parentPath, initialData }),
+  switchVault: (vaultPath, migrateCurrentData, currentData) =>
+    ipcRenderer.invoke('vault-switch', { vaultPath, migrateCurrentData, currentData }),
+  openVaultInExplorer: (vaultPath) => ipcRenderer.invoke('vault-open-in-explorer', vaultPath),
   setAutoLaunch: (enable) => ipcRenderer.invoke('set-auto-launch', enable),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
   selectProjectFile: () => ipcRenderer.invoke('select-project-file'),

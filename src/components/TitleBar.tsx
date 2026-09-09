@@ -1,5 +1,5 @@
 import React from 'react';
-import { Minus, X, Maximize2, Minimize2, Pin, Sparkles } from 'lucide-react';
+import { Minus, X, Maximize2, Minimize2, Pin, Sparkles, Folder } from 'lucide-react';
 
 interface TitleBarProps {
   isCompact: boolean;
@@ -9,6 +9,9 @@ interface TitleBarProps {
   onMinimize: () => void;
   onClose: () => void;
   activeDateLabel?: string;
+  vaultName?: string;
+  vaultPath?: string;
+  onOpenVault?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -19,6 +22,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onMinimize,
   onClose,
   activeDateLabel,
+  vaultName,
+  vaultPath,
+  onOpenVault,
 }) => {
   return (
     <header
@@ -84,6 +90,48 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         >
           {isCompact ? 'WIDGET' : 'STUDIO'}
         </span>
+
+        {/* Vault Status Pill */}
+        {onOpenVault && (
+          <button
+            type="button"
+            onClick={onOpenVault}
+            title={vaultPath ? `Vault: ${vaultName}\nPath: ${vaultPath}\nClick to manage or switch vaults` : 'Manage Albaqros Vault'}
+            className="no-drag"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '2px 8px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.675rem',
+              cursor: 'pointer',
+              maxWidth: isCompact ? '120px' : '200px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: '#10b981',
+                boxShadow: '0 0 6px #10b981',
+                flexShrink: 0,
+              }}
+            />
+            <Folder size={11} color="#38bdf8" style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {vaultName || 'Vault'}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Center label (if date provided in compact or studio mode) */}

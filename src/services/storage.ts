@@ -1,4 +1,4 @@
-import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task } from '../types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task, VaultInfo } from '../types';
 
 const STORAGE_KEY = 'visual_productivity_data_v1';
 
@@ -331,5 +331,62 @@ export const StorageService = {
     a.download = `visual-productivity-backup-${getTodayString()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  async getVaultInfo(): Promise<VaultInfo | null> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.getVaultInfo) {
+      return (window as any).electronAPI.getVaultInfo();
+    }
+    return {
+      path: 'Local Web Storage',
+      name: 'Web Vault',
+      exists: true,
+      hasDataFile: true,
+      dataFilePath: 'localStorage',
+      cloudProvider: 'local',
+      isCustom: false,
+      recentVaults: [],
+    };
+  },
+
+  async selectVaultDirectory(): Promise<{
+    success: boolean;
+    vaultInfo?: VaultInfo;
+    data?: AppData;
+    isEmpty?: boolean;
+  } | null> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.selectVaultDirectory) {
+      return (window as any).electronAPI.selectVaultDirectory();
+    }
+    return null;
+  },
+
+  async createNewVault(
+    vaultName: string,
+    parentPath?: string,
+    initialData?: AppData
+  ): Promise<{ success: boolean; vaultInfo?: VaultInfo; data?: AppData; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.createNewVault) {
+      return (window as any).electronAPI.createNewVault(vaultName, parentPath, initialData);
+    }
+    return { success: false, error: 'Vault operations require desktop Electron app.' };
+  },
+
+  async switchVault(
+    vaultPath: string,
+    migrateCurrentData?: boolean,
+    currentData?: AppData
+  ): Promise<{ success: boolean; vaultInfo?: VaultInfo; data?: AppData; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.switchVault) {
+      return (window as any).electronAPI.switchVault(vaultPath, migrateCurrentData, currentData);
+    }
+    return { success: false, error: 'Vault operations require desktop Electron app.' };
+  },
+
+  async openVaultInExplorer(vaultPath?: string): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openVaultInExplorer) {
+      return (window as any).electronAPI.openVaultInExplorer(vaultPath);
+    }
+    return false;
   },
 };

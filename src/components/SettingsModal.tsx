@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check } from 'lucide-react';
-import { AppData, AppSettings } from '../types';
+import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink } from 'lucide-react';
+import { AppData, AppSettings, VaultInfo } from '../types';
 import { StorageService } from '../services/storage';
 
 interface SettingsModalProps {
@@ -9,6 +9,8 @@ interface SettingsModalProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: AppSettings) => void;
   data: AppData;
+  vaultInfo?: VaultInfo | null;
+  onOpenVaultModal?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -17,6 +19,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onUpdateSettings,
   data,
+  vaultInfo,
+  onOpenVaultModal,
 }) => {
   const [currentPath, setCurrentPath] = useState(settings.storagePath || 'Default User Data Directory');
   const [runOnStartup, setRunOnStartup] = useState(settings.runOnStartup);
@@ -125,49 +129,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {/* Cloud Sync Folder Section */}
+          {/* Cloud Sync & Vault Storage Section */}
           <div
             style={{
-              padding: '14px',
-              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+              padding: '16px',
+              backgroundColor: 'rgba(99, 102, 241, 0.05)',
               borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-subtle)',
+              border: '1px solid rgba(99, 102, 241, 0.2)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <Cloud size={16} color="#38bdf8" />
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Cloud Sync Folder (Google Drive / OneDrive)
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldCheck size={18} color="#818cf8" />
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Active Storage Vault
+                </span>
+              </div>
+              {onOpenVaultModal && (
+                <button
+                  type="button"
+                  onClick={onOpenVaultModal}
+                  className="btn-primary"
+                  style={{ fontSize: '0.75rem', padding: '5px 10px', gap: '6px' }}
+                >
+                  <Folder size={12} /> Manage Vault...
+                </button>
+              )}
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '10px', lineHeight: 1.4 }}>
-              Choose a folder inside your Google Drive or OneDrive. Your tasks and journals will sync seamlessly across multiple computers.
+
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.4 }}>
+              Albaqros saves all tasks, notes, journal entries, and tracked metrics inside your chosen vault folder. When placed in Google Drive or OneDrive, it auto-syncs across computers.
             </p>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input
-                type="text"
-                readOnly
-                value={currentPath}
-                title={currentPath}
+              <div
                 style={{
                   flex: 1,
-                  backgroundColor: 'var(--bg-input)',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
                   border: '1px solid var(--border-medium)',
                   borderRadius: 'var(--radius-sm)',
                   padding: '7px 10px',
                   fontSize: '0.775rem',
-                  color: 'var(--text-muted)',
+                  color: 'var(--text-primary)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  fontFamily: 'var(--font-mono)',
                 }}
-              />
+                title={vaultInfo?.path || currentPath}
+              >
+                {vaultInfo?.path || currentPath}
+              </div>
               <button
                 type="button"
                 onClick={handleSelectFolder}
                 className="btn-secondary"
                 style={{ fontSize: '0.775rem', padding: '7px 12px', flexShrink: 0 }}
+                title="Browse for folder"
               >
                 <Folder size={13} /> Browse...
               </button>

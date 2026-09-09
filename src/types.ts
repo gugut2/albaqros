@@ -113,8 +113,28 @@ export interface DayEntry {
   remindersCompleted?: Record<string, boolean>; // Keyed by reminder id e.g. { "rem-1": true }
 }
 
+export type CloudProvider = 'onedrive' | 'google-drive' | 'dropbox' | 'icloud' | 'local';
+
+export interface RecentVault {
+  path: string;
+  name: string;
+  lastUsed: string;
+}
+
+export interface VaultInfo {
+  path: string;
+  name: string;
+  exists: boolean;
+  hasDataFile: boolean;
+  dataFilePath: string;
+  cloudProvider: CloudProvider;
+  isCustom: boolean;
+  recentVaults?: RecentVault[];
+}
+
 export interface AppSettings {
   storagePath: string; // Custom Google Drive / OneDrive folder or default
+  activeVault?: string; // Active Vault folder path
   runOnStartup: boolean;
   alwaysOnTop: boolean;
   compactMode: boolean;

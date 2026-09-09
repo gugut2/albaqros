@@ -102,11 +102,19 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 8. ☁️ Local-First & Cloud Folder Sync
-- **Atomic JSON Storage**: All entries, tasks, and settings are saved locally in `productivity-data.json`.
-- **Zero Lock-In & Cloud Compatible**: Point your storage directory to **Google Drive**, **OneDrive**, **Dropbox**, or any local folder via the Settings modal.
-- **Live File Watcher**: Automatically detects changes if the file is updated on another machine, hot-reloading state without loss of focus.
-- **Windows Auto-Launch**: Toggle launch on system startup with a single click.
+### 8. 📁 Albaqros Vault & Cloud Drive Auto-Sync (Google Drive / OneDrive)
+- **User-Defined Vault Folder**:
+  - Name your vault whatever you wish (e.g. `MyVault`, `LifeOS`, `AlbaqrosVault`) and place it anywhere on your filesystem, including inside **Google Drive**, **OneDrive**, **Dropbox**, or local disk.
+  - Select an existing vault folder or create a new vault directly from Albaqros with 1 click.
+  - When creating or choosing a vault, Albaqros automatically saves your data into `albaqros-data.json`, writes `vault.json` metadata, and creates an `artifacts/` folder for creative milestone files.
+- **Permanent Vault Persistence**:
+  - Remembers your active vault permanently in desktop configuration (`albaqros-config.json`), instantly mounting your chosen vault whenever the app boots.
+- **Automatic Cloud Drive Sync & Hot-Reloading**:
+  - Built-in file watcher monitors your active vault. When Google Drive, OneDrive, or Dropbox syncs changes from another computer, Albaqros automatically hot-reloads data in the background without losing focus.
+  - Local save debounce prevents feedback loops from your own writes.
+- **Unified TitleBar & Vault Manager**:
+  - Quick-glance clickable vault pill directly in the TitleBar (`📁 MyVault • 🟢 Synced`).
+  - Dedicated Vault Management Modal with cloud provider auto-detection (`☁️ OneDrive`, `☁️ Google Drive`, `☁️ Dropbox`, `💻 Local`), "Open in Explorer", "Sync Now", and a recent vaults switcher.
 
 ---
 

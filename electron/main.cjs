@@ -9,37 +9,148 @@ if (process.platform === 'win32') {
 
 let mainWindow = null;
 let isCompact = false;
-let customStoragePath = '';
 let fileWatcher = null;
 let tray = null;
+let lastLocalSaveTime = 0;
 
-const DEFAULT_DATA_FILENAME = 'productivity-data.json';
+const PRIMARY_DATA_FILENAME = 'albaqros-data.json';
+const LEGACY_DATA_FILENAME = 'productivity-data.json';
+const VAULT_META_FILENAME = 'vault.json';
 
-function getDefaultStoragePath() {
-  return path.join(app.getPath('userData'), DEFAULT_DATA_FILENAME);
+function getAppConfigPath() {
+  return path.join(app.getPath('userData'), 'albaqros-config.json');
 }
 
-function getActiveFilePath() {
-  if (customStoragePath && fs.existsSync(customStoragePath)) {
-    // If it's a directory, join with filename
-    const stat = fs.statSync(customStoragePath);
-    if (stat.isDirectory()) {
-      return path.join(customStoragePath, DEFAULT_DATA_FILENAME);
+function loadAppConfig() {
+  try {
+    const cfgPath = getAppConfigPath();
+    if (fs.existsSync(cfgPath)) {
+      const raw = fs.readFileSync(cfgPath, 'utf-8');
+      return JSON.parse(raw);
     }
-    return customStoragePath;
+  } catch (err) {
+    console.error('Failed to load albaqros-config.json:', err);
   }
-  return getDefaultStoragePath();
+  return { vaultPath: '', recentVaults: [] };
+}
+
+function saveAppConfig(config) {
+  try {
+    const cfgPath = getAppConfigPath();
+    const dir = path.dirname(cfgPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save albaqros-config.json:', err);
+  }
+}
+
+// Initialize config on boot
+let appConfig = loadAppConfig();
+let activeVaultPath = appConfig.vaultPath && fs.existsSync(appConfig.vaultPath) ? appConfig.vaultPath : '';
+
+function getDefaultVaultPath() {
+  return path.join(app.getPath('userData'), 'DefaultVault');
+}
+
+function detectCloudProvider(dirPath) {
+  if (!dirPath) return 'local';
+  const lower = dirPath.toLowerCase();
+  if (lower.includes('onedrive')) return 'onedrive';
+  if (lower.includes('google drive') || lower.includes('googledrive') || lower.includes('my drive') || lower.includes('drive')) return 'google-drive';
+  if (lower.includes('dropbox')) return 'dropbox';
+  if (lower.includes('icloud')) return 'icloud';
+  return 'local';
+}
+
+function getActiveVaultDirectory() {
+  if (activeVaultPath && fs.existsSync(activeVaultPath)) {
+    return activeVaultPath;
+  }
+  const defaultDir = getDefaultVaultPath();
+  if (!fs.existsSync(defaultDir)) {
+    try {
+      fs.mkdirSync(defaultDir, { recursive: true });
+    } catch (e) {}
+  }
+  return defaultDir;
+}
+
+function getActiveDataFilePath() {
+  const vaultDir = getActiveVaultDirectory();
+  const primaryPath = path.join(vaultDir, PRIMARY_DATA_FILENAME);
+  const legacyPath = path.join(vaultDir, LEGACY_DATA_FILENAME);
+
+  if (fs.existsSync(primaryPath)) return primaryPath;
+  if (fs.existsSync(legacyPath)) return legacyPath;
+
+  // Check legacy user data path for migration
+  const oldUserDefault = path.join(app.getPath('userData'), LEGACY_DATA_FILENAME);
+  if (fs.existsSync(oldUserDefault) && !activeVaultPath) {
+    return oldUserDefault;
+  }
+
+  return primaryPath;
+}
+
+function getVaultInfo(vaultDir) {
+  const targetDir = vaultDir || getActiveVaultDirectory();
+  const exists = fs.existsSync(targetDir);
+  let vaultName = exists ? path.basename(targetDir) : (targetDir ? path.basename(targetDir) : 'Default Vault');
+
+  // Try reading vault.json if exists
+  const metaPath = path.join(targetDir, VAULT_META_FILENAME);
+  if (fs.existsSync(metaPath)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      if (meta.name) vaultName = meta.name;
+    } catch (e) {}
+  }
+
+  const primaryPath = path.join(targetDir, PRIMARY_DATA_FILENAME);
+  const legacyPath = path.join(targetDir, LEGACY_DATA_FILENAME);
+  const hasDataFile = fs.existsSync(primaryPath) || fs.existsSync(legacyPath);
+  const activeFilePath = fs.existsSync(primaryPath) ? primaryPath : (fs.existsSync(legacyPath) ? legacyPath : primaryPath);
+
+  return {
+    path: targetDir,
+    name: vaultName,
+    exists,
+    hasDataFile,
+    dataFilePath: activeFilePath,
+    cloudProvider: detectCloudProvider(targetDir),
+    isCustom: Boolean(activeVaultPath && activeVaultPath !== getDefaultVaultPath()),
+    recentVaults: appConfig.recentVaults || [],
+  };
+}
+
+function recordRecentVault(vaultPath, vaultName) {
+  if (!vaultPath) return;
+  const name = vaultName || path.basename(vaultPath);
+  const existing = (appConfig.recentVaults || []).filter((v) => v.path !== vaultPath);
+  const updated = [
+    { path: vaultPath, name, lastUsed: new Date().toISOString() },
+    ...existing,
+  ].slice(0, 8);
+  appConfig.recentVaults = updated;
+  appConfig.vaultPath = vaultPath;
+  saveAppConfig(appConfig);
 }
 
 function setupFileWatcher(filePath) {
   if (fileWatcher) {
-    fileWatcher.close();
+    try {
+      fileWatcher.close();
+    } catch (e) {}
     fileWatcher = null;
   }
   try {
     if (fs.existsSync(filePath)) {
       fileWatcher = fs.watch(filePath, (eventType) => {
-        if (eventType === 'change' && mainWindow) {
+        // Ignore local saves made by Albaqros within 2.5 seconds
+        if (Date.now() - lastLocalSaveTime < 2500) return;
+        if (eventType === 'change' && mainWindow && !mainWindow.isDestroyed()) {
+          console.log('External data change detected in vault:', filePath);
           mainWindow.webContents.send('external-data-change');
         }
       });
@@ -142,7 +253,7 @@ function createWindow() {
   }
 
   // Initial file watch
-  setupFileWatcher(getActiveFilePath());
+  setupFileWatcher(getActiveDataFilePath());
 }
 
 // IPC Handlers
@@ -191,13 +302,15 @@ ipcMain.handle('window-set-always-on-top', (_, flag) => {
   return false;
 });
 
-// Storage IPCs
+// Storage & Vault IPCs
 ipcMain.handle('load-data', async () => {
-  const filePath = getActiveFilePath();
+  const filePath = getActiveDataFilePath();
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf-8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      setupFileWatcher(filePath);
+      return parsed;
     }
   } catch (err) {
     console.error('Error reading data file:', err);
@@ -206,43 +319,209 @@ ipcMain.handle('load-data', async () => {
 });
 
 ipcMain.handle('save-data', async (_, data) => {
-  const filePath = getActiveFilePath();
+  const vaultDir = getActiveVaultDirectory();
   try {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(vaultDir)) {
+      fs.mkdirSync(vaultDir, { recursive: true });
     }
-    // Atomic write via temp file
+
+    // Write vault.json metadata if not already present
+    const metaPath = path.join(vaultDir, VAULT_META_FILENAME);
+    if (!fs.existsSync(metaPath)) {
+      try {
+        fs.writeFileSync(
+          metaPath,
+          JSON.stringify(
+            {
+              name: path.basename(vaultDir),
+              createdAt: new Date().toISOString(),
+              version: 1,
+            },
+            null,
+            2
+          ),
+          'utf-8'
+        );
+      } catch (e) {}
+    }
+
+    const filePath = path.join(vaultDir, PRIMARY_DATA_FILENAME);
+    lastLocalSaveTime = Date.now();
     const tempPath = `${filePath}.tmp`;
     fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
     fs.renameSync(tempPath, filePath);
-    return { success: true, path: filePath };
+
+    setupFileWatcher(filePath);
+    return { success: true, path: filePath, vaultInfo: getVaultInfo() };
   } catch (err) {
     console.error('Error saving data file:', err);
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('select-storage-directory', async () => {
+ipcMain.handle('vault-get-info', () => {
+  return getVaultInfo();
+});
+
+ipcMain.handle('vault-select-existing', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select Cloud Sync Folder (Google Drive / OneDrive)',
+    title: 'Select Albaqros Vault Folder (Google Drive / OneDrive / Local)',
     properties: ['openDirectory', 'createDirectory'],
   });
 
   if (!result.canceled && result.filePaths.length > 0) {
-    customStoragePath = result.filePaths[0];
-    const newFilePath = getActiveFilePath();
-    setupFileWatcher(newFilePath);
-    return customStoragePath;
+    const selectedDir = result.filePaths[0];
+    activeVaultPath = selectedDir;
+    recordRecentVault(selectedDir);
+
+    const vaultInfo = getVaultInfo(selectedDir);
+    const dataFilePath = getActiveDataFilePath();
+    let loadedData = null;
+
+    if (fs.existsSync(dataFilePath)) {
+      try {
+        const raw = fs.readFileSync(dataFilePath, 'utf-8');
+        loadedData = JSON.parse(raw);
+      } catch (e) {
+        console.error('Error parsing vault data:', e);
+      }
+    }
+
+    setupFileWatcher(dataFilePath);
+    return {
+      success: true,
+      vaultInfo,
+      data: loadedData,
+      isEmpty: !loadedData,
+    };
   }
   return null;
 });
 
-ipcMain.handle('get-storage-info', () => {
+ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialData }) => {
+  if (!mainWindow) return { success: false, error: 'No main window' };
+
+  let targetParent = parentPath;
+  if (!targetParent || !fs.existsSync(targetParent)) {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: `Choose Destination Folder for "${vaultName || 'Albaqros Vault'}" (e.g. inside Google Drive or OneDrive)`,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+    targetParent = result.filePaths[0];
+  }
+
+  const cleanName = (vaultName || 'Albaqros Vault').trim();
+  const targetVaultDir = path.join(targetParent, cleanName);
+
+  try {
+    if (!fs.existsSync(targetVaultDir)) {
+      fs.mkdirSync(targetVaultDir, { recursive: true });
+    }
+
+    // Create artifacts subfolder in vault
+    const artifactsDir = path.join(targetVaultDir, 'artifacts');
+    if (!fs.existsSync(artifactsDir)) {
+      fs.mkdirSync(artifactsDir, { recursive: true });
+    }
+
+    // Write vault.json metadata
+    const metaPath = path.join(targetVaultDir, VAULT_META_FILENAME);
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          name: cleanName,
+          createdAt: new Date().toISOString(),
+          version: 1,
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+
+    // Write initial data if provided
+    const dataFilePath = path.join(targetVaultDir, PRIMARY_DATA_FILENAME);
+    if (initialData) {
+      lastLocalSaveTime = Date.now();
+      fs.writeFileSync(dataFilePath, JSON.stringify(initialData, null, 2), 'utf-8');
+    }
+
+    activeVaultPath = targetVaultDir;
+    recordRecentVault(targetVaultDir, cleanName);
+    setupFileWatcher(dataFilePath);
+
+    return {
+      success: true,
+      vaultInfo: getVaultInfo(targetVaultDir),
+      data: initialData || null,
+    };
+  } catch (err) {
+    console.error('Error creating new vault:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('vault-switch', async (_, { vaultPath, migrateCurrentData, currentData }) => {
+  if (!vaultPath || !fs.existsSync(vaultPath)) {
+    return { success: false, error: 'Vault directory does not exist' };
+  }
+
+  activeVaultPath = vaultPath;
+  recordRecentVault(vaultPath);
+
+  const dataFilePath = getActiveDataFilePath();
+  let loadedData = null;
+
+  if (fs.existsSync(dataFilePath)) {
+    try {
+      const raw = fs.readFileSync(dataFilePath, 'utf-8');
+      loadedData = JSON.parse(raw);
+    } catch (e) {
+      console.error('Error loading vault data:', e);
+    }
+  } else if (migrateCurrentData && currentData) {
+    try {
+      lastLocalSaveTime = Date.now();
+      fs.writeFileSync(dataFilePath, JSON.stringify(currentData, null, 2), 'utf-8');
+      loadedData = currentData;
+    } catch (e) {
+      console.error('Error migrating data into vault:', e);
+    }
+  }
+
+  setupFileWatcher(dataFilePath);
   return {
-    filePath: getActiveFilePath(),
-    isCustom: Boolean(customStoragePath),
+    success: true,
+    vaultInfo: getVaultInfo(vaultPath),
+    data: loadedData,
+  };
+});
+
+ipcMain.handle('vault-open-in-explorer', async (_, targetPath) => {
+  const dir = targetPath || getActiveVaultDirectory();
+  if (fs.existsSync(dir)) {
+    await shell.openPath(dir);
+    return true;
+  }
+  return false;
+});
+
+// Backwards-compatible aliases
+ipcMain.handle('select-storage-directory', async () => {
+  const vaultInfo = getVaultInfo();
+  return vaultInfo.path;
+});
+
+ipcMain.handle('get-storage-info', () => {
+  const info = getVaultInfo();
+  return {
+    filePath: info.dataFilePath,
+    isCustom: info.isCustom,
   };
 });
 

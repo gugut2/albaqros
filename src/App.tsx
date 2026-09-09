@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact } from './types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact, VaultInfo } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { processDayRollover } from './services/recurrence';
 import { TitleBar } from './components/TitleBar';
@@ -12,12 +12,16 @@ import { SettingsModal } from './components/SettingsModal';
 import { MajorTaskModal } from './components/MajorTaskModal';
 import { ProjectArtifactModal } from './components/ProjectArtifactModal';
 import { DailyPropertiesModal } from './components/DailyPropertiesModal';
+import { VaultModal } from './components/VaultModal';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<AppData | null>(null);
   const [currentDate, setCurrentDate] = useState<string>(getTodayString());
   const [isCompact, setIsCompact] = useState<boolean>(true);
   const [alwaysOnTop, setAlwaysOnTop] = useState<boolean>(false);
+  const [vaultInfo, setVaultInfo] = useState<VaultInfo | null>(null);
+  const [isVaultModalOpen, setIsVaultModalOpen] = useState<boolean>(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
@@ -49,6 +53,10 @@ export const App: React.FC = () => {
       setAlwaysOnTop(loaded.settings?.alwaysOnTop || false);
       setIsCompact(loaded.settings?.compactMode ?? true);
 
+      // Load active vault metadata
+      const vInfo = await StorageService.getVaultInfo();
+      if (vInfo) setVaultInfo(vInfo);
+
       // Save updated state
       await StorageService.save(updatedData);
     }
@@ -59,6 +67,10 @@ export const App: React.FC = () => {
       (window as any).electronAPI.onExternalDataChange(async () => {
         const refreshed = await StorageService.load();
         setData(refreshed);
+        const vInfo = await StorageService.getVaultInfo();
+        if (vInfo) setVaultInfo(vInfo);
+        setSyncNotice('☁️ Vault updated from drive');
+        setTimeout(() => setSyncNotice(null), 3000);
       });
     }
   }, []);
@@ -707,6 +719,23 @@ export const App: React.FC = () => {
     }));
   };
 
+  // --- Vault Handlers ---
+
+  const handleVaultChanged = (newVaultInfo: VaultInfo, newData?: AppData) => {
+    setVaultInfo(newVaultInfo);
+    if (newData) {
+      setData(newData);
+    }
+    updateData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        storagePath: newVaultInfo.path,
+        activeVault: newVaultInfo.path,
+      },
+    }));
+  };
+
   // --- Window Handlers ---
 
   const handleToggleMode = async () => {
@@ -786,6 +815,9 @@ export const App: React.FC = () => {
         onToggleAlwaysOnTop={handleToggleAlwaysOnTop}
         onMinimize={handleMinimizeWindow}
         onClose={handleCloseWindow}
+        vaultName={vaultInfo?.name}
+        vaultPath={vaultInfo?.path}
+        onOpenVault={() => setIsVaultModalOpen(true)}
       />
 
       {/* Main View: Compact Floating Widget vs Maximized Studio */}
@@ -935,6 +967,11 @@ export const App: React.FC = () => {
           updateData((prev) => ({ ...prev, settings: newSettings }))
         }
         data={data}
+        vaultInfo={vaultInfo}
+        onOpenVaultModal={() => {
+          setIsSettingsOpen(false);
+          setIsVaultModalOpen(true);
+        }}
       />
 
       {/* Daily Properties & Medication / Reminders Modal */}
@@ -949,6 +986,39 @@ export const App: React.FC = () => {
         onDeleteReminder={handleDeleteReminder}
         initialTab={propertiesModalTab}
       />
+
+      {/* Vault Management & Drive Sync Modal */}
+      <VaultModal
+        isOpen={isVaultModalOpen}
+        onClose={() => setIsVaultModalOpen(false)}
+        vaultInfo={vaultInfo}
+        onVaultChanged={handleVaultChanged}
+        currentData={data}
+      />
+
+      {/* Cloud Sync Toast Notification */}
+      {syncNotice && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            backgroundColor: '#10b981',
+            color: '#ffffff',
+            padding: '8px 16px',
+            borderRadius: '20px',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            boxShadow: '0 8px 24px rgba(16, 185, 129, 0.4)',
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          {syncNotice}
+        </div>
+      )}
     </div>
   );
 };
