@@ -25,7 +25,7 @@ const defaultSettings: AppSettings = {
   storagePath: '',
   runOnStartup: true,
   alwaysOnTop: false,
-  compactMode: false,
+  compactMode: true, // Opens in Widget Mode by default on first launch
   defaultEnergyFilter: 'all',
 };
 
@@ -393,11 +393,16 @@ export const StorageService = {
 
   async getVaultInfo(): Promise<VaultInfo | null> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.getVaultInfo) {
-      return (window as any).electronAPI.getVaultInfo();
+      try {
+        const info = await (window as any).electronAPI.getVaultInfo();
+        if (info) return info;
+      } catch (err) {
+        console.warn('Electron IPC getVaultInfo error, using fallback:', err);
+      }
     }
     return {
-      path: 'Local Web Storage',
-      name: 'Web Vault',
+      path: 'Default Vault',
+      name: 'Default Vault',
       exists: true,
       hasDataFile: true,
       dataFilePath: 'localStorage',
@@ -414,7 +419,12 @@ export const StorageService = {
     isEmpty?: boolean;
   } | null> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.selectVaultDirectory) {
-      return (window as any).electronAPI.selectVaultDirectory();
+      try {
+        return await (window as any).electronAPI.selectVaultDirectory();
+      } catch (err) {
+        console.error('Error in selectVaultDirectory IPC:', err);
+        throw err;
+      }
     }
     return null;
   },
@@ -425,7 +435,12 @@ export const StorageService = {
     initialData?: AppData
   ): Promise<{ success: boolean; vaultInfo?: VaultInfo; data?: AppData; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.createNewVault) {
-      return (window as any).electronAPI.createNewVault(vaultName, parentPath, initialData);
+      try {
+        return await (window as any).electronAPI.createNewVault(vaultName, parentPath, initialData);
+      } catch (err: any) {
+        console.error('Error in createNewVault IPC:', err);
+        return { success: false, error: err.message || 'Failed to create vault in Electron' };
+      }
     }
     return { success: false, error: 'Vault operations require desktop Electron app.' };
   },
@@ -436,14 +451,23 @@ export const StorageService = {
     currentData?: AppData
   ): Promise<{ success: boolean; vaultInfo?: VaultInfo; data?: AppData; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.switchVault) {
-      return (window as any).electronAPI.switchVault(vaultPath, migrateCurrentData, currentData);
+      try {
+        return await (window as any).electronAPI.switchVault(vaultPath, migrateCurrentData, currentData);
+      } catch (err: any) {
+        console.error('Error in switchVault IPC:', err);
+        return { success: false, error: err.message || 'Failed to switch vault in Electron' };
+      }
     }
     return { success: false, error: 'Vault operations require desktop Electron app.' };
   },
 
   async openVaultInExplorer(vaultPath?: string): Promise<boolean> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openVaultInExplorer) {
-      return (window as any).electronAPI.openVaultInExplorer(vaultPath);
+      try {
+        return await (window as any).electronAPI.openVaultInExplorer(vaultPath);
+      } catch (err) {
+        console.warn('Error in openVaultInExplorer IPC:', err);
+      }
     }
     return false;
   },
