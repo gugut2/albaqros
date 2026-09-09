@@ -80,11 +80,37 @@ export interface MajorTask {
   artifacts?: ProjectArtifact[]; // Creative deliverables / milestones
 }
 
+export type DailyPropertyType = 'number' | 'text' | 'boolean';
+
+export interface DailyPropertyDefinition {
+  id: string; // e.g. "prop-weight", "prop-investments"
+  name: string; // e.g. "Weight", "Investments"
+  unit?: string; // e.g. "kg", "$", "hrs", "L"
+  type: DailyPropertyType;
+  icon?: string;
+  defaultValue?: number | string | boolean;
+}
+
+export type ReminderCategory = 'medication' | 'routine' | 'habit' | 'general';
+
+export interface DailyReminder {
+  id: string;
+  title: string; // e.g. "Vitamin D", "Saturday Meds"
+  category: ReminderCategory;
+  dosage?: string; // e.g. "1 capsule with breakfast", "5g"
+  recurrence: RecurrenceRule; // daily, weekly_days (e.g. Sat), interval, cycle
+  color?: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface DayEntry {
   date: string; // YYYY-MM-DD
   journal: string; // Free-style journal entry
   energyLevel?: number; // 1 to 5 daily energy/mood rating
   updatedAt: string;
+  properties?: Record<string, number | string | boolean>; // Keyed by property id e.g. { "prop-weight": 78.2 }
+  remindersCompleted?: Record<string, boolean>; // Keyed by reminder id e.g. { "rem-1": true }
 }
 
 export interface AppSettings {
@@ -102,6 +128,8 @@ export interface AppData {
   recurringTemplates: Task[];
   majorTasks: MajorTask[]; // Major initiatives / long-term projects
   customThemes: string[]; // Dynamically user-defined themes/facets
+  dailyProperties?: DailyPropertyDefinition[]; // Tracked metrics like Weight, Investments
+  dailyReminders?: DailyReminder[]; // Recurring routine meds and non-task reminders
   settings: AppSettings;
   lastOpenedDate: string; // YYYY-MM-DD
 }

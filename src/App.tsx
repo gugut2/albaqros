@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { AppData, AppSettings, DayEntry, MajorTask, Subtask, Task, ProjectArtifact } from './types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { processDayRollover } from './services/recurrence';
 import { TitleBar } from './components/TitleBar';
@@ -11,6 +11,7 @@ import { StaleRescueModal } from './components/StaleRescueModal';
 import { SettingsModal } from './components/SettingsModal';
 import { MajorTaskModal } from './components/MajorTaskModal';
 import { ProjectArtifactModal } from './components/ProjectArtifactModal';
+import { DailyPropertiesModal } from './components/DailyPropertiesModal';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<AppData | null>(null);
@@ -27,6 +28,8 @@ export const App: React.FC = () => {
   const [isArtifactModalOpen, setIsArtifactModalOpen] = useState<boolean>(false);
   const [artifactModalMajorTaskId, setArtifactModalMajorTaskId] = useState<string | null>(null);
   const [editingArtifact, setEditingArtifact] = useState<ProjectArtifact | null>(null);
+  const [isPropertiesModalOpen, setIsPropertiesModalOpen] = useState<boolean>(false);
+  const [propertiesModalTab, setPropertiesModalTab] = useState<'properties' | 'reminders'>('reminders');
 
   // Load data on startup and process day rollover
   useEffect(() => {
@@ -580,6 +583,130 @@ export const App: React.FC = () => {
     });
   };
 
+  // --- Daily Tracked Properties & Medication / Reminders Handlers ---
+
+  const handleUpdateProperty = (
+    dateStr: string,
+    propertyId: string,
+    value: number | string | boolean
+  ) => {
+    updateData((prev) => {
+      const currentEntry = prev.entries[dateStr] || {
+        date: dateStr,
+        journal: '',
+        energyLevel: 3,
+        updatedAt: new Date().toISOString(),
+      };
+      const currentProps = currentEntry.properties || {};
+      return {
+        ...prev,
+        entries: {
+          ...prev.entries,
+          [dateStr]: {
+            ...currentEntry,
+            properties: {
+              ...currentProps,
+              [propertyId]: value,
+            },
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      };
+    });
+  };
+
+  const handleSavePropertyDefinition = (propDef: DailyPropertyDefinition) => {
+    updateData((prev) => {
+      const existingList = prev.dailyProperties || [];
+      const exists = existingList.some((p) => p.id === propDef.id);
+      const updatedList = exists
+        ? existingList.map((p) => (p.id === propDef.id ? propDef : p))
+        : [...existingList, propDef];
+      return {
+        ...prev,
+        dailyProperties: updatedList,
+      };
+    });
+  };
+
+  const handleDeletePropertyDefinition = (propId: string) => {
+    updateData((prev) => ({
+      ...prev,
+      dailyProperties: (prev.dailyProperties || []).filter((p) => p.id !== propId),
+    }));
+  };
+
+  const handleToggleReminder = (dateStr: string, reminderId: string) => {
+    updateData((prev) => {
+      const currentEntry = prev.entries[dateStr] || {
+        date: dateStr,
+        journal: '',
+        energyLevel: 3,
+        updatedAt: new Date().toISOString(),
+      };
+      const currentReminders = currentEntry.remindersCompleted || {};
+      const nextState = !currentReminders[reminderId];
+
+      if (nextState) {
+        try {
+          confetti({
+            particleCount: 22,
+            spread: 45,
+            origin: { y: 0.8 },
+            colors: ['#06b6d4', '#10b981', '#a855f7', '#38bdf8'],
+          });
+        } catch (e) {}
+      }
+
+      return {
+        ...prev,
+        entries: {
+          ...prev.entries,
+          [dateStr]: {
+            ...currentEntry,
+            remindersCompleted: {
+              ...currentReminders,
+              [reminderId]: nextState,
+            },
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      };
+    });
+  };
+
+  const handleSaveReminder = (
+    reminderData: Omit<DailyReminder, 'id' | 'createdAt'>,
+    existingId?: string
+  ) => {
+    updateData((prev) => {
+      const existingList = prev.dailyReminders || [];
+      if (existingId) {
+        const updatedList = existingList.map((r) =>
+          r.id === existingId ? { ...r, ...reminderData } : r
+        );
+        return { ...prev, dailyReminders: updatedList };
+      } else {
+        const newReminder: DailyReminder = {
+          ...reminderData,
+          id: `rem-${Date.now()}`,
+          createdAt: new Date().toISOString(),
+        };
+        return {
+          ...prev,
+          dailyReminders: [...existingList, newReminder],
+        };
+      }
+    });
+  };
+
+  const handleDeleteReminder = (reminderId: string) => {
+    updateData((prev) => ({
+      ...prev,
+      dailyReminders: (prev.dailyReminders || []).filter((r) => r.id !== reminderId),
+    }));
+  };
+
   // --- Window Handlers ---
 
   const handleToggleMode = async () => {
@@ -669,6 +796,9 @@ export const App: React.FC = () => {
             tasks={data.tasks}
             entry={currentDayEntry}
             majorTasks={data.majorTasks}
+            properties={data.dailyProperties || []}
+            reminders={data.dailyReminders || []}
+            allEntries={data.entries || {}}
             onPrevDay={handlePrevDay}
             onNextDay={handleNextDay}
             onToggleComplete={handleToggleComplete}
@@ -681,6 +811,16 @@ export const App: React.FC = () => {
             onToggleSubtask={handleToggleSubtask}
             onAddSubtask={handleAddSubtask}
             onDeleteSubtask={handleDeleteSubtask}
+            onToggleReminder={handleToggleReminder}
+            onUpdateProperty={handleUpdateProperty}
+            onOpenManageProperties={() => {
+              setPropertiesModalTab('properties');
+              setIsPropertiesModalOpen(true);
+            }}
+            onOpenManageReminders={() => {
+              setPropertiesModalTab('reminders');
+              setIsPropertiesModalOpen(true);
+            }}
           />
         ) : (
           <MaximizedView
@@ -718,6 +858,16 @@ export const App: React.FC = () => {
             onOpenAddArtifact={handleOpenAddArtifact}
             onEditArtifact={handleEditArtifact}
             onDeleteArtifact={handleDeleteArtifact}
+            onToggleReminder={handleToggleReminder}
+            onUpdateProperty={handleUpdateProperty}
+            onOpenManageProperties={() => {
+              setPropertiesModalTab('properties');
+              setIsPropertiesModalOpen(true);
+            }}
+            onOpenManageReminders={() => {
+              setPropertiesModalTab('reminders');
+              setIsPropertiesModalOpen(true);
+            }}
           />
         )}
       </div>
@@ -785,6 +935,19 @@ export const App: React.FC = () => {
           updateData((prev) => ({ ...prev, settings: newSettings }))
         }
         data={data}
+      />
+
+      {/* Daily Properties & Medication / Reminders Modal */}
+      <DailyPropertiesModal
+        isOpen={isPropertiesModalOpen}
+        onClose={() => setIsPropertiesModalOpen(false)}
+        properties={data.dailyProperties || []}
+        reminders={data.dailyReminders || []}
+        onSaveProperty={handleSavePropertyDefinition}
+        onDeleteProperty={handleDeletePropertyDefinition}
+        onSaveReminder={handleSaveReminder}
+        onDeleteReminder={handleDeleteReminder}
+        initialTab={propertiesModalTab}
       />
     </div>
   );

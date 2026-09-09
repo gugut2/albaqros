@@ -74,14 +74,27 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 5. ✍️ Reflective Journaling & Smart Lists
+### 5. ⚖️ Daily Tracked Properties & Recurring Meds / Reminders Hub
+- **Daily Tracked Properties (Metrics)**:
+  - Track quantitative and qualitative metrics per day such as **Weight** (`kg`), **Investments** (`$`), or create custom properties on demand (e.g., Water, Sleep, Mood).
+  - Automatic real-time trend delta indicators comparing against the most recently logged date (e.g., `-0.3 kg`, `+$250`, `neutral`).
+  - Seamless auto-save directly tied to each day's record in `DayEntry.properties`.
+- **Recurring Medication & Routine Reminders Engine**:
+  - **No Rollover Penalty**: Designed specifically for routine check-ins, medication adherence, and habits that shouldn't skew task completion rates or generate "missed task" rollover baggage.
+  - **Flexible Recurrence Engine**: Configure medications and reminders to surface **Daily**, on **Specific Days of the Week** (e.g. *Every Saturday*), at **Intervals** (every $N$ days), or in **On/Off Cycles**.
+  - **One-Click Adherence**: Fast toggle between `[ Pending ]` and `[ ✓ Taken ]` with celebratory feedback, saved per date in `DayEntry.remindersCompleted`.
+  - **Unified Dual-Mode Access**: Available in the Compact Companion's expandable *"Daily Routine, Meds & Metrics"* drawer, directly on Today's Agenda in Maximized Studio, and retroactively reviewable in the Past Days Archive.
+
+---
+
+### 6. ✍️ Reflective Journaling & Smart Lists
 - **Intelligent Auto-Bullets**: Pressing `Enter` on a bullet line automatically starts the next bullet point (`• `). Pressing `Enter` on an empty bullet cleanly exits the list.
 - **One-Click List Converter**: Convert raw notes into structured bullet points with the `Format as List` toolbar action.
 - **Daily Energy Rating**: Log your daily energy on a 1–5 scale to correlate mood and capacity with task completion over time.
 
 ---
 
-### 6. 📊 Visual Analytics & Consistency Matrix
+### 7. 📊 Visual Analytics & Consistency Matrix
 - **Trend Velocity**: Recharts area graph tracking completion rates over 7, 14, or 30 days.
 - **Streak Tracker**: Tracks your continuous consistency streak.
 - **Life Facet Consistency**: Track progress across custom themes (`#work`, `#health`, `#chores`, `#personal`, or your own custom tags).
@@ -89,7 +102,7 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 7. ☁️ Local-First & Cloud Folder Sync
+### 8. ☁️ Local-First & Cloud Folder Sync
 - **Atomic JSON Storage**: All entries, tasks, and settings are saved locally in `productivity-data.json`.
 - **Zero Lock-In & Cloud Compatible**: Point your storage directory to **Google Drive**, **OneDrive**, **Dropbox**, or any local folder via the Settings modal.
 - **Live File Watcher**: Automatically detects changes if the file is updated on another machine, hot-reloading state without loss of focus.

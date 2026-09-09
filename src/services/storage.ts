@@ -1,4 +1,4 @@
-import { AppData, AppSettings, DayEntry, Task } from '../types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task } from '../types';
 
 const STORAGE_KEY = 'visual_productivity_data_v1';
 
@@ -28,6 +28,40 @@ const defaultSettings: AppSettings = {
   compactMode: false,
   defaultEnergyFilter: 'all',
 };
+
+export const DEFAULT_DAILY_PROPERTIES: DailyPropertyDefinition[] = [
+  { id: 'prop-weight', name: 'Weight', unit: 'kg', type: 'number', icon: 'scale' },
+  { id: 'prop-investments', name: 'Investments', unit: '$', type: 'number', icon: 'trending-up' },
+];
+
+export const DEFAULT_DAILY_REMINDERS: DailyReminder[] = [
+  {
+    id: 'rem-vitamin-d',
+    title: 'Vitamin D3 & Omega 3',
+    category: 'medication',
+    dosage: '1 softgel after breakfast',
+    recurrence: { isRecurring: true, type: 'daily' },
+    color: '#38bdf8',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'rem-saturday-med',
+    title: 'Weekly Injectable / Saturday Treatment',
+    category: 'medication',
+    dosage: '1 dose with water',
+    recurrence: { isRecurring: true, type: 'weekly_days', daysOfWeek: [6] }, // Every Saturday
+    color: '#a855f7',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'rem-portfolio-review',
+    title: 'Review Weekly Portfolio & Rebalance',
+    category: 'routine',
+    recurrence: { isRecurring: true, type: 'weekly_days', daysOfWeek: [0] }, // Sunday
+    color: '#10b981',
+    createdAt: new Date().toISOString(),
+  },
+];
 
 // Realistic initial sample data to wow the user immediately on first launch
 function createInitialData(): AppData {
@@ -164,12 +198,26 @@ function createInitialData(): AppData {
       date: today,
       journal: 'Starting the week with clear focus. Prioritizing deep work in the morning before tackling inbox triage. Energy feels solid.',
       energyLevel: 4,
+      properties: {
+        'prop-weight': 74.2,
+        'prop-investments': 18500,
+      },
+      remindersCompleted: {
+        'rem-vitamin-d': true,
+      },
       updatedAt: new Date().toISOString(),
     },
     [yesterdayStr]: {
       date: yesterdayStr,
       journal: 'Solid progress on the roadmap. Kept phone away during focus blocks which helped tremendously.',
       energyLevel: 5,
+      properties: {
+        'prop-weight': 74.5,
+        'prop-investments': 18250,
+      },
+      remindersCompleted: {
+        'rem-vitamin-d': true,
+      },
       updatedAt: new Date(Date.now() - 86400000).toISOString(),
     },
   };
@@ -203,6 +251,8 @@ function createInitialData(): AppData {
     entries: initialEntries,
     recurringTemplates: [],
     majorTasks: initialMajorTasks,
+    dailyProperties: DEFAULT_DAILY_PROPERTIES,
+    dailyReminders: DEFAULT_DAILY_REMINDERS,
     customThemes: ['Work', 'Health', 'Chores', 'Personal'],
     settings: defaultSettings,
     lastOpenedDate: today,
@@ -234,6 +284,14 @@ export const StorageService = {
         // Ensure majorTasks exists even from previous saves
         if (!data.majorTasks || !Array.isArray(data.majorTasks)) {
           data.majorTasks = [];
+        }
+        // Ensure dailyProperties exists even from previous saves
+        if (!data.dailyProperties || !Array.isArray(data.dailyProperties) || data.dailyProperties.length === 0) {
+          data.dailyProperties = DEFAULT_DAILY_PROPERTIES;
+        }
+        // Ensure dailyReminders exists even from previous saves
+        if (!data.dailyReminders || !Array.isArray(data.dailyReminders) || data.dailyReminders.length === 0) {
+          data.dailyReminders = DEFAULT_DAILY_REMINDERS;
         }
         return data;
       }

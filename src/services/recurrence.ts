@@ -3,11 +3,19 @@ import { getTodayString } from './storage';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function isTaskDueToday(rule?: RecurrenceRule, lastCompletedDate?: string): boolean {
+export function isReminderDueOnDate(
+  rule?: RecurrenceRule,
+  dateStr?: string,
+  lastCompletedDate?: string
+): boolean {
   if (!rule || !rule.isRecurring) return false;
 
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const targetDateStr = dateStr || getTodayString();
+  const [y, m, d] = targetDateStr.split('-').map(Number);
+  const targetDate = new Date(y, m - 1, d);
+  targetDate.setHours(0, 0, 0, 0);
+
+  const dayOfWeek = targetDate.getDay(); // 0 = Sunday, ..., 6 = Saturday
 
   switch (rule.type) {
     case 'daily':
@@ -24,8 +32,10 @@ export function isTaskDueToday(rule?: RecurrenceRule, lastCompletedDate?: string
 
     case 'interval_days': {
       if (!lastCompletedDate) return true;
-      const last = new Date(lastCompletedDate);
-      const diffMs = today.getTime() - last.getTime();
+      const [ly, lm, ld] = lastCompletedDate.split('-').map(Number);
+      const last = new Date(ly, lm - 1, ld);
+      last.setHours(0, 0, 0, 0);
+      const diffMs = targetDate.getTime() - last.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
       return diffDays >= (rule.intervalDays || 1);
     }
@@ -36,8 +46,7 @@ export function isTaskDueToday(rule?: RecurrenceRule, lastCompletedDate?: string
       const startDate = new Date(sy, sm - 1, sd);
       startDate.setHours(0, 0, 0, 0);
 
-      const curDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      const diffMs = curDate.getTime() - startDate.getTime();
+      const diffMs = targetDate.getTime() - startDate.getTime();
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
       if (diffDays < 0) return false;
 
@@ -50,13 +59,17 @@ export function isTaskDueToday(rule?: RecurrenceRule, lastCompletedDate?: string
     }
 
     case 'monthly': {
-      const todayDateNumber = today.getDate();
-      return todayDateNumber === (rule.monthlyDay || 1);
+      const targetDateNumber = targetDate.getDate();
+      return targetDateNumber === (rule.monthlyDay || 1);
     }
 
     default:
       return true;
   }
+}
+
+export function isTaskDueToday(rule?: RecurrenceRule, lastCompletedDate?: string): boolean {
+  return isReminderDueOnDate(rule, getTodayString(), lastCompletedDate);
 }
 
 /**

@@ -12,9 +12,14 @@ import {
   Check,
   X,
   AlertTriangle,
+  Pill,
+  Scale,
+  Activity,
+  TrendingUp,
 } from 'lucide-react';
 import { AppData, Task } from '../types';
 import { formatDateLabel } from '../services/storage';
+import { isReminderDueOnDate } from '../services/recurrence';
 
 interface HistoryViewProps {
   data: AppData;
@@ -27,6 +32,8 @@ interface HistoryViewProps {
   onAddTaskToDate: (dateStr: string, title: string, theme: string) => void;
   onDeleteDay: (dateStr: string) => void;
   onOpenInStudio: (dateStr: string) => void;
+  onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onToggleReminder?: (dateStr: string, reminderId: string) => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
@@ -40,6 +47,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onAddTaskToDate,
   onDeleteDay,
   onOpenInStudio,
+  onUpdateProperty,
+  onToggleReminder,
 }) => {
   // Collect all unique dates from entries and tasks
   const dateSet = new Set<string>();
@@ -157,8 +166,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <div style={{ fontSize: '0.825rem', fontWeight: 600 }}>{formatDateLabel(dateStr)}</div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
               </div>
-              <div style={{ fontSize: '0.725rem', fontWeight: 600, color: done > 0 ? '#10b981' : 'var(--text-muted)' }}>
-                {done}/{tasksOnDay.length}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {data.entries[dateStr]?.properties?.['prop-weight'] && (
+                  <span style={{ fontSize: '0.675rem', color: '#818cf8', backgroundColor: 'rgba(99, 102, 241, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>
+                    {data.entries[dateStr].properties!['prop-weight']}kg
+                  </span>
+                )}
+                <div style={{ fontSize: '0.725rem', fontWeight: 600, color: done > 0 ? '#10b981' : 'var(--text-muted)' }}>
+                  {done}/{tasksOnDay.length}
+                </div>
               </div>
             </button>
           );
@@ -273,6 +289,117 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Daily Properties & Meds Strip for this Date */}
+            {((data.dailyProperties && data.dailyProperties.length > 0) || (data.dailyReminders && data.dailyReminders.length > 0)) && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                {/* Properties Row */}
+                {data.dailyProperties && data.dailyProperties.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                      Tracked Properties
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {data.dailyProperties.map((prop) => {
+                        const val = dayEntry?.properties?.[prop.id];
+                        return (
+                          <div
+                            key={prop.id}
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid var(--border-medium)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              fontSize: '0.75rem',
+                            }}
+                          >
+                            <span style={{ color: 'var(--text-secondary)' }}>{prop.name}:</span>
+                            <input
+                              type={prop.type === 'number' ? 'number' : 'text'}
+                              placeholder="--"
+                              value={val !== undefined ? val.toString() : ''}
+                              onChange={(e) => {
+                                if (onUpdateProperty) {
+                                  const newVal = prop.type === 'number' ? (e.target.value === '' ? '' : parseFloat(e.target.value)) : e.target.value;
+                                  onUpdateProperty(selectedDate, prop.id, newVal as any);
+                                }
+                              }}
+                              disabled={!onUpdateProperty}
+                              style={{
+                                width: '60px',
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                borderBottom: '1px solid var(--border-subtle)',
+                                color: 'var(--text-primary)',
+                                fontWeight: 600,
+                                fontSize: '0.75rem',
+                                padding: '1px 2px',
+                                textAlign: 'right',
+                              }}
+                            />
+                            {prop.unit && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{prop.unit}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Meds Adherence for this Past Date */}
+                {data.dailyReminders && data.dailyReminders.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
+                      Medications & Routine Reminders
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {data.dailyReminders
+                        .filter((rem) => isReminderDueOnDate(rem.recurrence, selectedDate))
+                        .map((rem) => {
+                          const isDone = Boolean(dayEntry?.remindersCompleted?.[rem.id]);
+                          return (
+                            <button
+                              key={rem.id}
+                              type="button"
+                              onClick={() => onToggleReminder && onToggleReminder(selectedDate, rem.id)}
+                              disabled={!onToggleReminder}
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.725rem',
+                                fontWeight: 600,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                cursor: onToggleReminder ? 'pointer' : 'default',
+                                backgroundColor: isDone ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                                border: isDone ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
+                                color: isDone ? '#34d399' : 'var(--text-muted)',
+                              }}
+                            >
+                              <Pill size={11} />
+                              <span>{rem.title}</span>
+                              <span>{isDone ? '✓' : '—'}</span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Editable Tasks on this Day */}
             <div>

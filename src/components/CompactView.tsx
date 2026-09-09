@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Filter, Zap, Coffee, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { DayEntry, EnergyLevel, MajorTask, Task } from '../types';
+import { ChevronLeft, ChevronRight, Plus, Filter, Zap, Coffee, CheckCircle2, AlertTriangle, Pill, ChevronDown, ChevronUp, Activity } from 'lucide-react';
+import { DailyPropertyDefinition, DailyReminder, DayEntry, EnergyLevel, MajorTask, Task } from '../types';
 import { TaskItem } from './TaskItem';
 import { JournalSection } from './JournalSection';
+import { DailyRemindersCard } from './DailyRemindersCard';
+import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
 
 interface CompactViewProps {
@@ -10,6 +12,9 @@ interface CompactViewProps {
   tasks: Task[];
   entry?: DayEntry;
   majorTasks?: MajorTask[];
+  properties?: DailyPropertyDefinition[];
+  reminders?: DailyReminder[];
+  allEntries?: Record<string, DayEntry>;
   onPrevDay: () => void;
   onNextDay: () => void;
   onToggleComplete: (taskId: string) => void;
@@ -22,6 +27,10 @@ interface CompactViewProps {
   onToggleSubtask?: (taskId: string, subtaskId: string) => void;
   onAddSubtask?: (taskId: string, title: string) => void;
   onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
+  onToggleReminder?: (dateStr: string, reminderId: string) => void;
+  onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onOpenManageProperties?: () => void;
+  onOpenManageReminders?: () => void;
 }
 
 export const CompactView: React.FC<CompactViewProps> = ({
@@ -29,6 +38,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
   tasks,
   entry,
   majorTasks,
+  properties = [],
+  reminders = [],
+  allEntries = {},
   onPrevDay,
   onNextDay,
   onToggleComplete,
@@ -41,8 +53,13 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
+  onToggleReminder,
+  onUpdateProperty,
+  onOpenManageProperties,
+  onOpenManageReminders,
 }) => {
   const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'low'>('all');
+  const [isRoutineExpanded, setIsRoutineExpanded] = useState<boolean>(false);
 
   const isToday = currentDate === getTodayString();
   const dateLabel = formatDateLabel(currentDate);
@@ -132,6 +149,69 @@ export const CompactView: React.FC<CompactViewProps> = ({
             }}
           />
         </div>
+      </div>
+
+      {/* Collapsible Daily Routine & Properties Drawer */}
+      <div
+        style={{
+          borderRadius: 'var(--radius-md)',
+          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid var(--border-subtle)',
+          overflow: 'hidden',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsRoutineExpanded(!isRoutineExpanded)}
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            background: 'none',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            cursor: 'pointer',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Pill size={14} color="#34d399" />
+            <span style={{ fontSize: '0.775rem', fontWeight: 600 }}>Daily Routine, Meds & Metrics</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            {entry?.properties?.['prop-weight'] && (
+              <span style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', padding: '1px 5px', borderRadius: '3px' }}>
+                {entry.properties['prop-weight']} kg
+              </span>
+            )}
+            {isRoutineExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </div>
+        </button>
+
+        {isRoutineExpanded && (
+          <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <DailyRemindersCard
+              currentDate={currentDate}
+              reminders={reminders}
+              entry={entry}
+              onToggleReminder={onToggleReminder || (() => {})}
+              onOpenManageReminders={onOpenManageReminders || (() => {})}
+              isCompact={true}
+            />
+
+            <DailyPropertiesCard
+              currentDate={currentDate}
+              properties={properties}
+              entry={entry}
+              allEntries={allEntries}
+              onUpdateProperty={onUpdateProperty || (() => {})}
+              onOpenManageProperties={onOpenManageProperties || (() => {})}
+              isCompact={true}
+            />
+          </div>
+        )}
       </div>
 
       {/* Energy Quick Filters & Add Task Header */}

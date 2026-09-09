@@ -19,6 +19,8 @@ import { JournalSection } from './JournalSection';
 import { AnalyticsView } from './AnalyticsView';
 import { HistoryView } from './HistoryView';
 import { MajorTasksView } from './MajorTasksView';
+import { DailyRemindersCard } from './DailyRemindersCard';
+import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
 import { getRecurrenceDescription, getCycleStatus } from '../services/recurrence';
 
@@ -51,6 +53,10 @@ interface MaximizedViewProps {
   onOpenAddArtifact?: (majorTaskId: string) => void;
   onEditArtifact?: (majorTaskId: string, artifact: ProjectArtifact) => void;
   onDeleteArtifact?: (majorTaskId: string, artifactId: string) => void;
+  onToggleReminder?: (dateStr: string, reminderId: string) => void;
+  onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onOpenManageProperties?: () => void;
+  onOpenManageReminders?: () => void;
 }
 
 type StudioTab = 'today' | 'major' | 'analytics' | 'history' | 'recurring';
@@ -84,6 +90,10 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onOpenAddArtifact,
   onEditArtifact,
   onDeleteArtifact,
+  onToggleReminder,
+  onUpdateProperty,
+  onOpenManageProperties,
+  onOpenManageReminders,
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('today');
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
@@ -343,8 +353,18 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
 
             {/* Two-Column Studio Layout: Checklist (Left) & Journal (Right) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: '24px', flex: 1, minHeight: 0 }}>
-              {/* Left Column: Tasks */}
+              {/* Left Column: Tasks & Meds */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
+                {/* Daily Meds & Routine Reminders Strip */}
+                <DailyRemindersCard
+                  currentDate={currentDate}
+                  reminders={data.dailyReminders || []}
+                  entry={entry}
+                  onToggleReminder={onToggleReminder || (() => {})}
+                  onOpenManageReminders={onOpenManageReminders || (() => {})}
+                  isCompact={false}
+                />
+
                 {/* North Star Focus */}
                 {topFocusTask && (
                   <div>
@@ -424,8 +444,19 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                 </div>
               </div>
 
-              {/* Right Column: Freeform Journal Section */}
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {/* Right Column: Properties (Metrics) & Freeform Journal Section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', overflowY: 'auto' }}>
+                {/* Daily Tracked Properties Card */}
+                <DailyPropertiesCard
+                  currentDate={currentDate}
+                  properties={data.dailyProperties || []}
+                  entry={entry}
+                  allEntries={data.entries || {}}
+                  onUpdateProperty={onUpdateProperty || (() => {})}
+                  onOpenManageProperties={onOpenManageProperties || (() => {})}
+                  isCompact={false}
+                />
+
                 <JournalSection
                   entry={entry}
                   dateStr={currentDate}
@@ -475,6 +506,8 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
               onSelectDate(dateStr);
               setActiveTab('today');
             }}
+            onUpdateProperty={onUpdateProperty}
+            onToggleReminder={onToggleReminder}
           />
         )}
 
