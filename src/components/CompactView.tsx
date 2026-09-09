@@ -29,6 +29,9 @@ interface CompactViewProps {
   onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
   onToggleReminder?: (dateStr: string, reminderId: string) => void;
   onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onUpdateSubproperty?: (dateStr: string, propertyId: string, subpropertyId: string, value: number) => void;
+  onAddSubproperty?: (propertyId: string, name: string, unit?: string) => void;
+  onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
 }
@@ -55,6 +58,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onDeleteSubtask,
   onToggleReminder,
   onUpdateProperty,
+  onUpdateSubproperty,
+  onAddSubproperty,
+  onDeleteSubproperty,
   onOpenManageProperties,
   onOpenManageReminders,
 }) => {
@@ -207,6 +213,9 @@ export const CompactView: React.FC<CompactViewProps> = ({
               entry={entry}
               allEntries={allEntries}
               onUpdateProperty={onUpdateProperty || (() => {})}
+              onUpdateSubproperty={onUpdateSubproperty}
+              onAddSubproperty={onAddSubproperty}
+              onDeleteSubproperty={onDeleteSubproperty}
               onOpenManageProperties={onOpenManageProperties || (() => {})}
               isCompact={true}
             />

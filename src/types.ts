@@ -82,6 +82,13 @@ export interface MajorTask {
 
 export type DailyPropertyType = 'number' | 'text' | 'boolean';
 
+export interface DailySubpropertyDefinition {
+  id: string; // e.g. "subprop-stocks", "subprop-etf"
+  name: string; // e.g. "Stocks", "ETF"
+  unit?: string; // inherits from parent if not specified
+  defaultValue?: number;
+}
+
 export interface DailyPropertyDefinition {
   id: string; // e.g. "prop-weight", "prop-investments"
   name: string; // e.g. "Weight", "Investments"
@@ -89,6 +96,7 @@ export interface DailyPropertyDefinition {
   type: DailyPropertyType;
   icon?: string;
   defaultValue?: number | string | boolean;
+  subproperties?: DailySubpropertyDefinition[]; // Optional breakdown into sub-metrics whose values sum to the parent
 }
 
 export type ReminderCategory = 'medication' | 'routine' | 'habit' | 'general';
@@ -110,6 +118,7 @@ export interface DayEntry {
   energyLevel?: number; // 1 to 5 daily energy/mood rating
   updatedAt: string;
   properties?: Record<string, number | string | boolean>; // Keyed by property id e.g. { "prop-weight": 78.2 }
+  subpropertyValues?: Record<string, Record<string, number>>; // Keyed by [propertyId][subpropertyId] e.g. { "prop-investments": { "subprop-stocks": 12000, "subprop-etf": 5000 } }
   remindersCompleted?: Record<string, boolean>; // Keyed by reminder id e.g. { "rem-1": true }
 }
 

@@ -55,6 +55,9 @@ interface MaximizedViewProps {
   onDeleteArtifact?: (majorTaskId: string, artifactId: string) => void;
   onToggleReminder?: (dateStr: string, reminderId: string) => void;
   onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onUpdateSubproperty?: (dateStr: string, propertyId: string, subpropertyId: string, value: number) => void;
+  onAddSubproperty?: (propertyId: string, name: string, unit?: string) => void;
+  onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
 }
@@ -92,6 +95,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onDeleteArtifact,
   onToggleReminder,
   onUpdateProperty,
+  onUpdateSubproperty,
+  onAddSubproperty,
+  onDeleteSubproperty,
   onOpenManageProperties,
   onOpenManageReminders,
 }) => {
@@ -453,6 +459,9 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                   entry={entry}
                   allEntries={data.entries || {}}
                   onUpdateProperty={onUpdateProperty || (() => {})}
+                  onUpdateSubproperty={onUpdateSubproperty}
+                  onAddSubproperty={onAddSubproperty}
+                  onDeleteSubproperty={onDeleteSubproperty}
                   onOpenManageProperties={onOpenManageProperties || (() => {})}
                   isCompact={false}
                 />
@@ -507,6 +516,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
               setActiveTab('today');
             }}
             onUpdateProperty={onUpdateProperty}
+            onUpdateSubproperty={onUpdateSubproperty}
             onToggleReminder={onToggleReminder}
           />
         )}

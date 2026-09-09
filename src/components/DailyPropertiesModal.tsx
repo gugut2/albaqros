@@ -30,6 +30,8 @@ interface DailyPropertiesModalProps {
   onDeleteProperty: (propId: string) => void;
   onSaveReminder: (reminderData: Omit<DailyReminder, 'id' | 'createdAt'>, existingId?: string) => void;
   onDeleteReminder: (reminderId: string) => void;
+  onAddSubproperty?: (propertyId: string, name: string, unit?: string) => void;
+  onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   initialTab?: 'properties' | 'reminders';
 }
 
@@ -52,9 +54,14 @@ export const DailyPropertiesModal: React.FC<DailyPropertiesModalProps> = ({
   onDeleteProperty,
   onSaveReminder,
   onDeleteReminder,
+  onAddSubproperty,
+  onDeleteSubproperty,
   initialTab = 'reminders',
 }) => {
   const [activeTab, setActiveTab] = useState<'properties' | 'reminders'>(initialTab);
+  const [addingSubpropForPropId, setAddingSubpropForPropId] = useState<string | null>(null);
+  const [newSubpropName, setNewSubpropName] = useState('');
+  const [newSubpropUnit, setNewSubpropUnit] = useState('');
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -538,59 +545,236 @@ export const DailyPropertiesModal: React.FC<DailyPropertiesModalProps> = ({
                 TRACKED METRICS & PROPERTIES
               </label>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {properties.map((prop) => (
-                  <div
-                    key={prop.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--radius-sm)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                      border: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Activity size={15} color="#818cf8" />
-                      <div>
-                        <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {prop.name}
-                        </span>
-                        {prop.unit && (
-                          <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginLeft: '6px' }}>
-                            ({prop.unit})
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {properties.map((prop) => {
+                  const hasSubprops = Boolean(prop.subproperties && prop.subproperties.length > 0);
+                  const isAddingSub = addingSubpropForPropId === prop.id;
+
+                  return (
+                    <div
+                      key={prop.id}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      {/* Property Header */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Activity size={15} color="#818cf8" />
+                          <div>
+                            <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                              {prop.name}
+                            </span>
+                            {prop.unit && (
+                              <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                                ({prop.unit})
+                              </span>
+                            )}
+                            {hasSubprops && (
+                              <span
+                                style={{
+                                  fontSize: '0.675rem',
+                                  color: '#34d399',
+                                  backgroundColor: 'rgba(52, 211, 153, 0.12)',
+                                  padding: '1px 6px',
+                                  borderRadius: '3px',
+                                  marginLeft: '8px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                ∑ Auto-Summed ({prop.subproperties!.length})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              fontSize: '0.675rem',
+                              color: 'var(--text-muted)',
+                              backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            {prop.type}
                           </span>
-                        )}
+
+                          <button
+                            type="button"
+                            onClick={() => onDeleteProperty(prop.id)}
+                            className="btn-icon"
+                            style={{ color: '#f87171', padding: '4px' }}
+                            title="Delete property"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
-                    </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span
-                        style={{
-                          fontSize: '0.675rem',
-                          color: 'var(--text-muted)',
-                          backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        {prop.type}
-                      </span>
+                      {/* Subproperties List */}
+                      {hasSubprops && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '6px',
+                            paddingLeft: '22px',
+                            borderLeft: '2px solid rgba(99, 102, 241, 0.2)',
+                            marginLeft: '4px',
+                          }}
+                        >
+                          {prop.subproperties!.map((sub) => (
+                            <div
+                              key={sub.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                                border: '1px solid rgba(99, 102, 241, 0.2)',
+                                fontSize: '0.725rem',
+                              }}
+                            >
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{sub.name}</span>
+                              {sub.unit && <span style={{ color: 'var(--text-muted)', fontSize: '0.675rem' }}>({sub.unit})</span>}
+                              {onDeleteSubproperty && (
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteSubproperty(prop.id, sub.id)}
+                                  className="btn-icon"
+                                  style={{ color: 'var(--text-muted)', padding: '1px', marginLeft: '2px' }}
+                                  title={`Remove ${sub.name}`}
+                                >
+                                  <X size={11} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
-                      <button
-                        type="button"
-                        onClick={() => onDeleteProperty(prop.id)}
-                        className="btn-icon"
-                        style={{ color: '#f87171', padding: '4px' }}
-                        title="Delete property"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {/* Add Sub-metric inline toggle/form */}
+                      {prop.type === 'number' && onAddSubproperty && (
+                        <div style={{ paddingLeft: '22px' }}>
+                          {isAddingSub ? (
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                padding: '6px 8px',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid rgba(99, 102, 241, 0.25)',
+                              }}
+                            >
+                              <input
+                                type="text"
+                                placeholder="Sub-metric name (e.g. Stocks, Crypto)"
+                                value={newSubpropName}
+                                onChange={(e) => setNewSubpropName(e.target.value)}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && newSubpropName.trim()) {
+                                    e.preventDefault();
+                                    onAddSubproperty(prop.id, newSubpropName.trim(), newSubpropUnit.trim() || prop.unit);
+                                    setNewSubpropName('');
+                                    setNewSubpropUnit('');
+                                    setAddingSubpropForPropId(null);
+                                  }
+                                }}
+                                style={{
+                                  flex: 1,
+                                  backgroundColor: 'var(--bg-input)',
+                                  border: '1px solid var(--border-subtle)',
+                                  borderRadius: '3px',
+                                  padding: '3px 6px',
+                                  fontSize: '0.725rem',
+                                  color: 'var(--text-primary)',
+                                }}
+                              />
+                              <input
+                                type="text"
+                                placeholder={prop.unit || 'unit'}
+                                value={newSubpropUnit}
+                                onChange={(e) => setNewSubpropUnit(e.target.value)}
+                                style={{
+                                  width: '45px',
+                                  backgroundColor: 'var(--bg-input)',
+                                  border: '1px solid var(--border-subtle)',
+                                  borderRadius: '3px',
+                                  padding: '3px 4px',
+                                  fontSize: '0.725rem',
+                                  color: 'var(--text-primary)',
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!newSubpropName.trim()) return;
+                                  onAddSubproperty(prop.id, newSubpropName.trim(), newSubpropUnit.trim() || prop.unit);
+                                  setNewSubpropName('');
+                                  setNewSubpropUnit('');
+                                  setAddingSubpropForPropId(null);
+                                }}
+                                className="btn-primary"
+                                style={{ fontSize: '0.7rem', padding: '3px 8px' }}
+                              >
+                                Add
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAddingSubpropForPropId(null);
+                                  setNewSubpropName('');
+                                  setNewSubpropUnit('');
+                                }}
+                                className="btn-icon"
+                                style={{ padding: '2px' }}
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddingSubpropForPropId(prop.id);
+                                setNewSubpropName('');
+                                setNewSubpropUnit(prop.unit || '');
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#818cf8',
+                                fontSize: '0.725rem',
+                                cursor: 'pointer',
+                                padding: '2px 4px',
+                                borderRadius: '3px',
+                              }}
+                            >
+                              <Plus size={12} />
+                              <span>{hasSubprops ? 'Add another sub-metric' : 'Add sub-metrics (auto-summed)'}</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

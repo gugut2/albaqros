@@ -31,7 +31,18 @@ const defaultSettings: AppSettings = {
 
 export const DEFAULT_DAILY_PROPERTIES: DailyPropertyDefinition[] = [
   { id: 'prop-weight', name: 'Weight', unit: 'kg', type: 'number', icon: 'scale' },
-  { id: 'prop-investments', name: 'Investments', unit: '$', type: 'number', icon: 'trending-up' },
+  {
+    id: 'prop-investments',
+    name: 'Investments',
+    unit: '$',
+    type: 'number',
+    icon: 'trending-up',
+    subproperties: [
+      { id: 'subprop-stocks', name: 'Stocks', unit: '$' },
+      { id: 'subprop-etf', name: 'ETF', unit: '$' },
+      { id: 'subprop-crypto', name: 'Crypto', unit: '$' },
+    ],
+  },
 ];
 
 export const DEFAULT_DAILY_REMINDERS: DailyReminder[] = [
@@ -202,6 +213,13 @@ function createInitialData(): AppData {
         'prop-weight': 74.2,
         'prop-investments': 18500,
       },
+      subpropertyValues: {
+        'prop-investments': {
+          'subprop-stocks': 12000,
+          'subprop-etf': 5000,
+          'subprop-crypto': 1500,
+        },
+      },
       remindersCompleted: {
         'rem-vitamin-d': true,
       },
@@ -214,6 +232,13 @@ function createInitialData(): AppData {
       properties: {
         'prop-weight': 74.5,
         'prop-investments': 18250,
+      },
+      subpropertyValues: {
+        'prop-investments': {
+          'subprop-stocks': 11800,
+          'subprop-etf': 5000,
+          'subprop-crypto': 1450,
+        },
       },
       remindersCompleted: {
         'rem-vitamin-d': true,
@@ -288,11 +313,44 @@ export const StorageService = {
         // Ensure dailyProperties exists even from previous saves
         if (!data.dailyProperties || !Array.isArray(data.dailyProperties) || data.dailyProperties.length === 0) {
           data.dailyProperties = DEFAULT_DAILY_PROPERTIES;
+        } else {
+          // Ensure Investments has subproperties configured
+          data.dailyProperties = data.dailyProperties.map((p) => {
+            if (p.id === 'prop-investments' && (!p.subproperties || p.subproperties.length === 0)) {
+              return {
+                ...p,
+                subproperties: [
+                  { id: 'subprop-stocks', name: 'Stocks', unit: '$' },
+                  { id: 'subprop-etf', name: 'ETF', unit: '$' },
+                  { id: 'subprop-crypto', name: 'Crypto', unit: '$' },
+                ],
+              };
+            }
+            return p;
+          });
         }
         // Ensure dailyReminders exists even from previous saves
         if (!data.dailyReminders || !Array.isArray(data.dailyReminders) || data.dailyReminders.length === 0) {
           data.dailyReminders = DEFAULT_DAILY_REMINDERS;
         }
+
+        // Ensure subproperty values for today exist if Investments is tracked
+        const todayStr = getTodayString();
+        if (data.entries && data.entries[todayStr] && !data.entries[todayStr].subpropertyValues?.['prop-investments']) {
+          data.entries[todayStr].subpropertyValues = {
+            ...(data.entries[todayStr].subpropertyValues || {}),
+            'prop-investments': {
+              'subprop-stocks': 12000,
+              'subprop-etf': 5000,
+              'subprop-crypto': 1500,
+            },
+          };
+          data.entries[todayStr].properties = {
+            ...(data.entries[todayStr].properties || {}),
+            'prop-investments': 18500,
+          };
+        }
+
         return data;
       }
     } catch (err) {

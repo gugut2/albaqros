@@ -627,6 +627,112 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleUpdateSubproperty = (
+    dateStr: string,
+    propertyId: string,
+    subpropertyId: string,
+    value: number
+  ) => {
+    updateData((prev) => {
+      const currentEntry = prev.entries[dateStr] || {
+        date: dateStr,
+        journal: '',
+        energyLevel: 3,
+        updatedAt: new Date().toISOString(),
+      };
+      const currentSubpropValues = { ...(currentEntry.subpropertyValues || {}) };
+      const currentPropSubValues = { ...(currentSubpropValues[propertyId] || {}) };
+
+      currentPropSubValues[subpropertyId] = value;
+      currentSubpropValues[propertyId] = currentPropSubValues;
+
+      // Automatically recompute total sum across all subproperties
+      const computedSum = Object.values(currentPropSubValues).reduce(
+        (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
+        0
+      );
+
+      const currentProps = { ...(currentEntry.properties || {}) };
+      currentProps[propertyId] = computedSum;
+
+      return {
+        ...prev,
+        entries: {
+          ...prev.entries,
+          [dateStr]: {
+            ...currentEntry,
+            properties: currentProps,
+            subpropertyValues: currentSubpropValues,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      };
+    });
+  };
+
+  const handleAddSubproperty = (propertyId: string, name: string, unit?: string) => {
+    updateData((prev) => {
+      const existingList = prev.dailyProperties || [];
+      const updatedList = existingList.map((prop) => {
+        if (prop.id !== propertyId) return prop;
+        const newSubId = `sub-${Date.now()}`;
+        const existingSubs = prop.subproperties || [];
+        return {
+          ...prop,
+          subproperties: [...existingSubs, { id: newSubId, name, unit: unit || prop.unit }],
+        };
+      });
+      return {
+        ...prev,
+        dailyProperties: updatedList,
+      };
+    });
+  };
+
+  const handleDeleteSubproperty = (propertyId: string, subpropertyId: string) => {
+    updateData((prev) => {
+      const existingList = prev.dailyProperties || [];
+      const updatedList = existingList.map((prop) => {
+        if (prop.id !== propertyId) return prop;
+        return {
+          ...prop,
+          subproperties: (prop.subproperties || []).filter((s) => s.id !== subpropertyId),
+        };
+      });
+
+      // Recalculate sum across entries if removing a subproperty
+      const updatedEntries = { ...prev.entries };
+      for (const [dateKey, entry] of Object.entries(updatedEntries)) {
+        if (entry.subpropertyValues?.[propertyId]?.[subpropertyId] !== undefined) {
+          const updatedSubprops = { ...entry.subpropertyValues[propertyId] };
+          delete updatedSubprops[subpropertyId];
+          const newSum = Object.values(updatedSubprops).reduce(
+            (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
+            0
+          );
+          updatedEntries[dateKey] = {
+            ...entry,
+            properties: {
+              ...(entry.properties || {}),
+              [propertyId]: newSum,
+            },
+            subpropertyValues: {
+              ...(entry.subpropertyValues || {}),
+              [propertyId]: updatedSubprops,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      return {
+        ...prev,
+        dailyProperties: updatedList,
+        entries: updatedEntries,
+      };
+    });
+  };
+
   const handleSavePropertyDefinition = (propDef: DailyPropertyDefinition) => {
     updateData((prev) => {
       const existingList = prev.dailyProperties || [];
@@ -845,6 +951,9 @@ export const App: React.FC = () => {
             onDeleteSubtask={handleDeleteSubtask}
             onToggleReminder={handleToggleReminder}
             onUpdateProperty={handleUpdateProperty}
+            onUpdateSubproperty={handleUpdateSubproperty}
+            onAddSubproperty={handleAddSubproperty}
+            onDeleteSubproperty={handleDeleteSubproperty}
             onOpenManageProperties={() => {
               setPropertiesModalTab('properties');
               setIsPropertiesModalOpen(true);
@@ -892,6 +1001,9 @@ export const App: React.FC = () => {
             onDeleteArtifact={handleDeleteArtifact}
             onToggleReminder={handleToggleReminder}
             onUpdateProperty={handleUpdateProperty}
+            onUpdateSubproperty={handleUpdateSubproperty}
+            onAddSubproperty={handleAddSubproperty}
+            onDeleteSubproperty={handleDeleteSubproperty}
             onOpenManageProperties={() => {
               setPropertiesModalTab('properties');
               setIsPropertiesModalOpen(true);
@@ -984,6 +1096,8 @@ export const App: React.FC = () => {
         onDeleteProperty={handleDeletePropertyDefinition}
         onSaveReminder={handleSaveReminder}
         onDeleteReminder={handleDeleteReminder}
+        onAddSubproperty={handleAddSubproperty}
+        onDeleteSubproperty={handleDeleteSubproperty}
         initialTab={propertiesModalTab}
       />
 

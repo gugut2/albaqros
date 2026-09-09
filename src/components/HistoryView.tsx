@@ -33,6 +33,7 @@ interface HistoryViewProps {
   onDeleteDay: (dateStr: string) => void;
   onOpenInStudio: (dateStr: string) => void;
   onUpdateProperty?: (dateStr: string, propertyId: string, value: number | string | boolean) => void;
+  onUpdateSubproperty?: (dateStr: string, propertyId: string, subpropertyId: string, value: number) => void;
   onToggleReminder?: (dateStr: string, reminderId: string) => void;
 }
 
@@ -48,6 +49,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onDeleteDay,
   onOpenInStudio,
   onUpdateProperty,
+  onUpdateSubproperty,
   onToggleReminder,
 }) => {
   // Collect all unique dates from entries and tasks
@@ -167,6 +169,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {data.entries[dateStr]?.properties?.['prop-investments'] !== undefined && (
+                  <span style={{ fontSize: '0.675rem', color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.12)', padding: '1px 4px', borderRadius: '3px', fontWeight: 600 }}>
+                    ${Number(data.entries[dateStr].properties!['prop-investments']).toLocaleString()}
+                  </span>
+                )}
                 {data.entries[dateStr]?.properties?.['prop-weight'] && (
                   <span style={{ fontSize: '0.675rem', color: '#818cf8', backgroundColor: 'rgba(99, 102, 241, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>
                     {data.entries[dateStr].properties!['prop-weight']}kg
@@ -309,51 +316,159 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <div style={{ fontSize: '0.725rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px' }}>
                       Tracked Properties
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {data.dailyProperties.map((prop) => {
-                        const val = dayEntry?.properties?.[prop.id];
-                        return (
-                          <div
-                            key={prop.id}
-                            style={{
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                              backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid var(--border-medium)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              fontSize: '0.75rem',
-                            }}
-                          >
-                            <span style={{ color: 'var(--text-secondary)' }}>{prop.name}:</span>
-                            <input
-                              type={prop.type === 'number' ? 'number' : 'text'}
-                              placeholder="--"
-                              value={val !== undefined ? val.toString() : ''}
-                              onChange={(e) => {
-                                if (onUpdateProperty) {
-                                  const newVal = prop.type === 'number' ? (e.target.value === '' ? '' : parseFloat(e.target.value)) : e.target.value;
-                                  onUpdateProperty(selectedDate, prop.id, newVal as any);
-                                }
-                              }}
-                              disabled={!onUpdateProperty}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {/* Simple metrics (without subproperties) */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {data.dailyProperties
+                          .filter((p) => !p.subproperties || p.subproperties.length === 0)
+                          .map((prop) => {
+                            const val = dayEntry?.properties?.[prop.id];
+                            return (
+                              <div
+                                key={prop.id}
+                                style={{
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                                  border: '1px solid var(--border-medium)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  fontSize: '0.75rem',
+                                }}
+                              >
+                                <span style={{ color: 'var(--text-secondary)' }}>{prop.name}:</span>
+                                <input
+                                  type={prop.type === 'number' ? 'number' : 'text'}
+                                  placeholder="--"
+                                  value={val !== undefined ? val.toString() : ''}
+                                  onChange={(e) => {
+                                    if (onUpdateProperty) {
+                                      const newVal = prop.type === 'number' ? (e.target.value === '' ? '' : parseFloat(e.target.value)) : e.target.value;
+                                      onUpdateProperty(selectedDate, prop.id, newVal as any);
+                                    }
+                                  }}
+                                  disabled={!onUpdateProperty}
+                                  style={{
+                                    width: '60px',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    borderBottom: '1px solid var(--border-subtle)',
+                                    color: 'var(--text-primary)',
+                                    fontWeight: 600,
+                                    fontSize: '0.75rem',
+                                    padding: '1px 2px',
+                                    textAlign: 'right',
+                                  }}
+                                />
+                                {prop.unit && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{prop.unit}</span>}
+                              </div>
+                            );
+                          })}
+                      </div>
+
+                      {/* Compound metrics with subproperties (e.g. Investments) */}
+                      {data.dailyProperties
+                        .filter((p) => p.subproperties && p.subproperties.length > 0)
+                        .map((prop) => {
+                          const subvals = dayEntry?.subpropertyValues?.[prop.id] || {};
+                          // Calculate sum from subproperties or fallback to parent property
+                          const computedSum = Object.values(subvals).reduce(
+                            (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
+                            0
+                          );
+                          const totalVal = computedSum > 0 ? computedSum : (typeof dayEntry?.properties?.[prop.id] === 'number' ? (dayEntry.properties[prop.id] as number) : 0);
+
+                          return (
+                            <div
+                              key={prop.id}
                               style={{
-                                width: '60px',
-                                backgroundColor: 'transparent',
-                                border: 'none',
-                                borderBottom: '1px solid var(--border-subtle)',
-                                color: 'var(--text-primary)',
-                                fontWeight: 600,
-                                fontSize: '0.75rem',
-                                padding: '1px 2px',
-                                textAlign: 'right',
+                                padding: '8px 10px',
+                                borderRadius: 'var(--radius-sm)',
+                                backgroundColor: 'rgba(99, 102, 241, 0.05)',
+                                border: '1px solid rgba(99, 102, 241, 0.2)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px',
                               }}
-                            />
-                            {prop.unit && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{prop.unit}</span>}
-                          </div>
-                        );
-                      })}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    {prop.name} Total:
+                                  </span>
+                                  <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#34d399' }}>
+                                    {prop.unit === '$' ? `$${totalVal.toLocaleString()}` : `${totalVal.toLocaleString()} ${prop.unit || ''}`}
+                                  </span>
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: '0.675rem',
+                                    color: '#818cf8',
+                                    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                                    padding: '1px 6px',
+                                    borderRadius: '3px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ∑ Summed ({prop.subproperties!.length})
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                {prop.subproperties!.map((sub) => {
+                                  const rawVal = subvals[sub.id];
+                                  const displayVal = rawVal !== undefined ? rawVal : '';
+                                  return (
+                                    <div
+                                      key={sub.id}
+                                      style={{
+                                        padding: '3px 8px',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                        border: '1px solid var(--border-subtle)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        fontSize: '0.725rem',
+                                      }}
+                                    >
+                                      <span style={{ color: 'var(--text-secondary)' }}>{sub.name}:</span>
+                                      <input
+                                        type="number"
+                                        placeholder="0"
+                                        value={displayVal}
+                                        onChange={(e) => {
+                                          if (onUpdateSubproperty) {
+                                            const num = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                            onUpdateSubproperty(selectedDate, prop.id, sub.id, num);
+                                          }
+                                        }}
+                                        disabled={!onUpdateSubproperty}
+                                        style={{
+                                          width: '65px',
+                                          backgroundColor: 'transparent',
+                                          border: 'none',
+                                          borderBottom: '1px solid var(--border-subtle)',
+                                          color: 'var(--text-primary)',
+                                          fontWeight: 600,
+                                          fontSize: '0.725rem',
+                                          padding: '1px 2px',
+                                          textAlign: 'right',
+                                        }}
+                                      />
+                                      {(sub.unit || prop.unit) && (
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.675rem' }}>
+                                          {sub.unit || prop.unit}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
                     </div>
                   </div>
                 )}
