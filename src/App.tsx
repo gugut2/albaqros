@@ -34,6 +34,7 @@ export const App: React.FC = () => {
   const [editingArtifact, setEditingArtifact] = useState<ProjectArtifact | null>(null);
   const [isPropertiesModalOpen, setIsPropertiesModalOpen] = useState<boolean>(false);
   const [propertiesModalTab, setPropertiesModalTab] = useState<'properties' | 'reminders'>('reminders');
+  const [updateReady, setUpdateReady] = useState<boolean>(false);
 
   // Load data on startup and process day rollover
   useEffect(() => {
@@ -73,6 +74,17 @@ export const App: React.FC = () => {
         setTimeout(() => setSyncNotice(null), 3000);
       });
     }
+
+    // Listen to auto-updater status for restart badge
+    const unsubUpdater = StorageService.onUpdaterStatus((info) => {
+      if (info.state === 'downloaded') {
+        setUpdateReady(true);
+      }
+    });
+
+    return () => {
+      if (unsubUpdater) unsubUpdater();
+    };
   }, []);
 
   // Save changes to storage whenever data changes
@@ -924,6 +936,8 @@ export const App: React.FC = () => {
         vaultName={vaultInfo?.name}
         vaultPath={vaultInfo?.path}
         onOpenVault={() => setIsVaultModalOpen(true)}
+        updateReady={updateReady}
+        onApplyUpdate={() => StorageService.installUpdate()}
       />
 
       {/* Main View: Compact Floating Widget vs Maximized Studio */}

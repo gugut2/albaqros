@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink } from 'lucide-react';
-import { AppData, AppSettings, VaultInfo } from '../types';
+import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink, Sparkles, RefreshCw, ArrowUpCircle, AlertTriangle } from 'lucide-react';
+import { AppData, AppSettings, VaultInfo, UpdateInfo } from '../types';
 import { StorageService } from '../services/storage';
 
 interface SettingsModalProps {
@@ -26,20 +26,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [runOnStartup, setRunOnStartup] = useState(settings.runOnStartup);
   const [alwaysOnTop, setAlwaysOnTop] = useState(settings.alwaysOnTop);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('1.0.0');
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({ state: 'idle' });
 
   useEffect(() => {
-    // If electron is available, check native auto-launch state and storage path
-    if (typeof window !== 'undefined' && (window as any).electronAPI?.getStorageInfo) {
-      (window as any).electronAPI.getStorageInfo().then((info: any) => {
-        if (info?.filePath) setCurrentPath(info.filePath);
+    // If electron is available, check native auto-launch state, version, and storage path
+    if (typeof window !== 'undefined') {
+      if ((window as any).electronAPI?.getStorageInfo) {
+        (window as any).electronAPI.getStorageInfo().then((info: any) => {
+          if (info?.filePath) setCurrentPath(info.filePath);
+        });
+      }
+      if ((window as any).electronAPI?.getAutoLaunch) {
+        (window as any).electronAPI.getAutoLaunch().then((launch: boolean) => {
+          setRunOnStartup(launch);
+        });
+      }
+      StorageService.getAppVersion().then(setAppVersion);
+
+      const unsubscribe = StorageService.onUpdaterStatus((info) => {
+        setUpdateInfo(info);
       });
-      (window as any).electronAPI.getAutoLaunch().then((launch: boolean) => {
-        setRunOnStartup(launch);
-      });
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleCheckForUpdates = async () => {
+    setUpdateInfo({ state: 'checking' });
+    const res = await StorageService.checkForUpdates();
+    if (res && !res.success && res.error) {
+      setUpdateInfo({ state: 'error', error: res.error });
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    setUpdateInfo((prev) => ({ ...prev, state: 'downloading', progress: 0 }));
+    const res = await StorageService.downloadUpdate();
+    if (res && !res.success && res.error) {
+      setUpdateInfo({ state: 'error', error: res.error });
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    await StorageService.installUpdate();
+  };
 
   const handleSelectFolder = async () => {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.selectStorageDirectory) {
@@ -239,6 +273,211 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 style={{ width: '16px', height: '16px', accentColor: '#6366f1', cursor: 'pointer' }}
               />
             </label>
+          </div>
+
+          {/* App Version & Auto-Patcher */}
+          <div
+            style={{
+              padding: '14px',
+              backgroundColor: 'rgba(56, 189, 248, 0.04)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(56, 189, 248, 0.2)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Sparkles size={15} color="#38bdf8" />
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  App Version & Auto-Patcher
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                  color: '#38bdf8',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                v{appVersion}
+              </span>
+            </div>
+
+            {/* State: Idle */}
+            {updateInfo.state === 'idle' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Checks GitHub Releases for new updates and delta patches.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCheckForUpdates}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '5px 10px', gap: '5px', flexShrink: 0 }}
+                >
+                  <RefreshCw size={12} /> Check for Updates
+                </button>
+              </div>
+            )}
+
+            {/* State: Checking */}
+            {updateInfo.state === 'checking' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0' }}>
+                <RefreshCw size={13} color="#38bdf8" className="animate-spin" />
+                <span style={{ fontSize: '0.75rem', color: '#38bdf8' }}>
+                  Checking GitHub Releases for new versions...
+                </span>
+              </div>
+            )}
+
+            {/* State: Up to Date */}
+            {updateInfo.state === 'not-available' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Check size={14} color="#34d399" />
+                  <span style={{ fontSize: '0.75rem', color: '#34d399', fontWeight: 500 }}>
+                    Albaqros is up to date (v{appVersion})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckForUpdates}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Check again
+                </button>
+              </div>
+            )}
+
+            {/* State: Update Available */}
+            {updateInfo.state === 'available' && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sparkles size={14} color="#818cf8" />
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#ffffff' }}>
+                      New Version Available: v{updateInfo.version}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadUpdate}
+                    className="btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '4px 10px', gap: '5px' }}
+                  >
+                    <Download size={12} /> Download Patch
+                  </button>
+                </div>
+                {updateInfo.releaseNotes && (
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.3 }}>
+                    {updateInfo.releaseNotes}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* State: Downloading */}
+            {updateInfo.state === 'downloading' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.725rem' }}>
+                  <span style={{ color: '#38bdf8' }}>Downloading patch...</span>
+                  <span style={{ fontWeight: 700, color: '#ffffff', fontFamily: 'var(--font-mono)' }}>
+                    {updateInfo.progress || 0}%
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: '6px',
+                    borderRadius: '3px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${updateInfo.progress || 0}%`,
+                      backgroundColor: '#38bdf8',
+                      transition: 'width 0.2s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* State: Downloaded / Ready to Install */}
+            {updateInfo.state === 'downloaded' && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'rgba(52, 211, 153, 0.12)',
+                  border: '1px solid rgba(52, 211, 153, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#34d399' }}>
+                    Patch Downloaded!
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Restart Albaqros to apply the update immediately.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleInstallUpdate}
+                  className="btn-primary"
+                  style={{
+                    backgroundColor: '#10b981',
+                    fontSize: '0.75rem',
+                    padding: '6px 12px',
+                    gap: '5px',
+                    boxShadow: '0 0 15px rgba(16, 185, 129, 0.4)',
+                  }}
+                >
+                  <ArrowUpCircle size={14} /> Restart & Apply
+                </button>
+              </div>
+            )}
+
+            {/* State: Error */}
+            {updateInfo.state === 'error' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertTriangle size={13} color="#f87171" />
+                  <span style={{ fontSize: '0.725rem', color: '#f87171' }}>
+                    {updateInfo.error || 'Failed to check for updates'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckForUpdates}
+                  style={{ background: 'none', border: 'none', color: '#818cf8', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Backup & Export */}

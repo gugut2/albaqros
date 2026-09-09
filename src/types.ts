@@ -162,3 +162,24 @@ export interface AppData {
   settings: AppSettings;
   lastOpenedDate: string; // YYYY-MM-DD
 }
+
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateInfo {
+  state: UpdateState;
+  version?: string;
+  progress?: number;
+  bytesPerSecond?: number;
+  transferred?: number;
+  total?: number;
+  error?: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+}

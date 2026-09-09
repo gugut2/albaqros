@@ -12,6 +12,8 @@ interface TitleBarProps {
   vaultName?: string;
   vaultPath?: string;
   onOpenVault?: () => void;
+  updateReady?: boolean;
+  onApplyUpdate?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -25,6 +27,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   vaultName,
   vaultPath,
   onOpenVault,
+  updateReady,
+  onApplyUpdate,
 }) => {
   return (
     <header
@@ -154,9 +158,35 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '4px',
+          gap: '6px',
         }}
       >
+        {/* Update Ready Restart Pill */}
+        {updateReady && onApplyUpdate && (
+          <button
+            type="button"
+            onClick={onApplyUpdate}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              backgroundColor: '#10b981',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '2px 8px',
+              fontSize: '0.675rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 0 10px rgba(16, 185, 129, 0.45)',
+            }}
+            title="Click to restart and apply new version patch"
+          >
+            <Sparkles size={11} />
+            <span>Update Ready</span>
+          </button>
+        )}
+
         {/* Pin Always on Top Toggle */}
         <button
           type="button"

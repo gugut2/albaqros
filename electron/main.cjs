@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
 
 app.setName('Albaqros');
 if (process.platform === 'win32') {
@@ -664,9 +665,127 @@ ipcMain.handle('show-item-in-folder', (_, filePath) => {
   }
 });
 
+// ==========================================
+// In-App Patcher & Auto-Updater Integration
+// ==========================================
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function sendUpdaterStatus(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater-status', payload);
+  }
+}
+
+autoUpdater.on('checking-for-update', () => {
+  sendUpdaterStatus({ state: 'checking' });
+});
+
+autoUpdater.on('update-available', (info) => {
+  sendUpdaterStatus({
+    state: 'available',
+    version: info.version,
+    releaseDate: info.releaseDate,
+    releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
+  });
+});
+
+autoUpdater.on('update-not-available', (info) => {
+  sendUpdaterStatus({
+    state: 'not-available',
+    version: info?.version,
+  });
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  sendUpdaterStatus({
+    state: 'downloading',
+    progress: Math.round(progressObj.percent || 0),
+    bytesPerSecond: progressObj.bytesPerSecond,
+    transferred: progressObj.transferred,
+    total: progressObj.total,
+  });
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  sendUpdaterStatus({
+    state: 'downloaded',
+    version: info?.version,
+  });
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('autoUpdater error:', err);
+  sendUpdaterStatus({
+    state: 'error',
+    error: err ? err.message : 'Unknown updater error',
+  });
+});
+
+ipcMain.handle('app-get-version', () => {
+  return app.getVersion();
+});
+
+ipcMain.handle('updater-check', async () => {
+  try {
+    const isDev = Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development' || !app.isPackaged);
+    if (isDev) {
+      sendUpdaterStatus({ state: 'checking' });
+      setTimeout(() => {
+        sendUpdaterStatus({
+          state: 'not-available',
+          version: app.getVersion(),
+          releaseNotes: 'You are running the development build of Albaqros. Automatic GitHub updates run in packaged builds.',
+        });
+      }, 750);
+      return { success: true, isDev: true };
+    }
+    const result = await autoUpdater.checkForUpdates();
+    return { success: true, result };
+  } catch (err) {
+    console.error('Error checking for updates:', err);
+    sendUpdaterStatus({ state: 'error', error: err.message });
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('updater-download', async () => {
+  try {
+    const isDev = Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development' || !app.isPackaged);
+    if (isDev) {
+      // Simulate download progress for previewing UI in dev mode
+      sendUpdaterStatus({ state: 'downloading', progress: 10 });
+      setTimeout(() => sendUpdaterStatus({ state: 'downloading', progress: 50 }), 400);
+      setTimeout(() => sendUpdaterStatus({ state: 'downloading', progress: 100 }), 800);
+      setTimeout(() => sendUpdaterStatus({ state: 'downloaded', version: '1.0.1' }), 1000);
+      return { success: true, isDev: true };
+    }
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (err) {
+    console.error('Error downloading update:', err);
+    sendUpdaterStatus({ state: 'error', error: err.message });
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('updater-install', () => {
+  autoUpdater.quitAndInstall(false, true);
+});
+
 app.whenReady().then(() => {
   createWindow();
   setupTray();
+
+  // Check for updates automatically in background 4 seconds after launch (when packaged)
+  if (app.isPackaged) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn('Initial background update check skipped:', err.message);
+      });
+    }, 4000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

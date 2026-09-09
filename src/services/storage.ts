@@ -1,4 +1,4 @@
-import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task, VaultInfo } from '../types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task, VaultInfo, UpdateInfo } from '../types';
 
 const STORAGE_KEY = 'visual_productivity_data_v1';
 
@@ -470,5 +470,53 @@ export const StorageService = {
       }
     }
     return false;
+  },
+
+  async getAppVersion(): Promise<string> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.getAppVersion) {
+      try {
+        return await (window as any).electronAPI.getAppVersion();
+      } catch (e) {}
+    }
+    return '1.0.0';
+  },
+
+  async checkForUpdates(): Promise<any> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.checkForUpdates) {
+      try {
+        return await (window as any).electronAPI.checkForUpdates();
+      } catch (e: any) {
+        return { success: false, error: e.message };
+      }
+    }
+    return { success: false, error: 'Auto-updater requires desktop Electron app.' };
+  },
+
+  async downloadUpdate(): Promise<any> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.downloadUpdate) {
+      try {
+        return await (window as any).electronAPI.downloadUpdate();
+      } catch (e: any) {
+        return { success: false, error: e.message };
+      }
+    }
+    return { success: false, error: 'Auto-updater requires desktop Electron app.' };
+  },
+
+  async installUpdate(): Promise<void> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.installUpdate) {
+      try {
+        await (window as any).electronAPI.installUpdate();
+      } catch (e) {
+        console.error('Failed to install update:', e);
+      }
+    }
+  },
+
+  onUpdaterStatus(callback: (info: UpdateInfo) => void): (() => void) | undefined {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.onUpdaterStatus) {
+      return (window as any).electronAPI.onUpdaterStatus(callback);
+    }
+    return undefined;
   },
 };
