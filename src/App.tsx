@@ -976,6 +976,9 @@ export const App: React.FC = () => {
               setPropertiesModalTab('reminders');
               setIsPropertiesModalOpen(true);
             }}
+            onViewAnalytics={() => {
+              setIsCompact(false);
+            }}
           />
         ) : (
           <MaximizedView

@@ -1,4 +1,4 @@
-import { AppData, Task } from '../types';
+import { AppData, DailyPropertyDefinition, Task } from '../types';
 
 export interface ThemeStat {
   theme: string;
@@ -194,3 +194,288 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
     staleTasksCount,
   };
 }
+
+export interface SubpropertyBreakdown {
+  id: string;
+  name: string;
+  value: number;
+  percentage: number;
+  color: string;
+}
+
+export interface PropertyDataPoint {
+  date: string;
+  dayLabel: string;
+  value: number | null;
+  carriedValue: number | null;
+  hasActualEntry: boolean;
+  [subpropId: string]: any;
+}
+
+export interface PropertyAnalytics {
+  property: DailyPropertyDefinition;
+  dataPoints: PropertyDataPoint[];
+  currentValue: number | null;
+  currentDate?: string;
+  previousValue: number | null;
+  previousDate?: string;
+  delta: number;
+  deltaPercent: number;
+  high: number | null;
+  highDate?: string;
+  low: number | null;
+  lowDate?: string;
+  average: number | null;
+  recordedCount: number;
+  subproperties: SubpropertyBreakdown[];
+}
+
+export const SUBPROP_PALETTE = [
+  '#6366f1', // Indigo
+  '#38bdf8', // Sky Blue
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#ec4899', // Pink
+  '#8b5cf6', // Violet
+  '#14b8a6', // Teal
+  '#f97316', // Orange
+];
+
+export function getSubpropertyColor(index: number): string {
+  return SUBPROP_PALETTE[index % SUBPROP_PALETTE.length];
+}
+
+export function calculatePropertyAnalytics(
+  data: AppData,
+  propertyId: string,
+  rangeDays: number | 'all' = 14
+): PropertyAnalytics | null {
+  const property = (data.dailyProperties || []).find((p) => p.id === propertyId);
+  if (!property) return null;
+
+  const entries = data.entries || {};
+  const today = new Date();
+
+  // Determine chronological list of dates to evaluate
+  const dateList: string[] = [];
+
+  if (rangeDays === 'all') {
+    // Gather all dates with entries or default to last 30 days
+    const recordedDates = Object.keys(entries)
+      .filter((d) => {
+        const ent = entries[d];
+        return (
+          ent?.properties?.[propertyId] !== undefined ||
+          (ent?.subpropertyValues?.[propertyId] &&
+            Object.keys(ent.subpropertyValues[propertyId]).length > 0)
+        );
+      })
+      .sort();
+
+    if (recordedDates.length === 0) {
+      // Default to 14 days if nothing recorded yet
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        dateList.push(
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        );
+      }
+    } else {
+      // Continuous date range from first recorded date to today
+      const [startYear, startMonth, startDay] = recordedDates[0].split('-').map(Number);
+      const startDate = new Date(startYear, startMonth - 1, startDay);
+      const diffTime = Math.max(0, today.getTime() - startDate.getTime());
+      const totalDays = Math.min(365, Math.max(7, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1));
+
+      for (let i = totalDays - 1; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        dateList.push(
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        );
+      }
+    }
+  } else {
+    for (let i = rangeDays - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dateList.push(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      );
+    }
+  }
+
+  // Pre-fetch any historical value prior to the start of the dateList for carry-forward
+  let lastKnownValue: number | null = null;
+  const lastKnownSubValues: Record<string, number> = {};
+
+  const priorDates = Object.keys(entries)
+    .filter((d) => d < dateList[0])
+    .sort();
+
+  for (const pDate of priorDates) {
+    const ent = entries[pDate];
+    if (ent?.properties?.[propertyId] !== undefined) {
+      const v = Number(ent.properties[propertyId]);
+      if (!isNaN(v)) lastKnownValue = v;
+    }
+    if (ent?.subpropertyValues?.[propertyId]) {
+      const subs = ent.subpropertyValues[propertyId];
+      for (const [subId, sVal] of Object.entries(subs)) {
+        if (typeof sVal === 'number' && !isNaN(sVal)) {
+          lastKnownSubValues[subId] = sVal;
+        }
+      }
+    }
+  }
+
+  const dataPoints: PropertyDataPoint[] = [];
+  const recordedPoints: { date: string; value: number }[] = [];
+
+  for (const dateStr of dateList) {
+    const [y, m, dNum] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, dNum);
+    const dayLabel = dateObj.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+
+    const entry = entries[dateStr];
+    let actualValue: number | null = null;
+    let hasActual = false;
+
+    // Check if property has subproperties
+    const subDefs = property.subproperties || [];
+
+    if (entry?.properties?.[propertyId] !== undefined) {
+      const rawVal = Number(entry.properties[propertyId]);
+      if (!isNaN(rawVal)) {
+        actualValue = rawVal;
+        hasActual = true;
+        lastKnownValue = rawVal;
+      }
+    } else if (subDefs.length > 0 && entry?.subpropertyValues?.[propertyId]) {
+      // Calculate sum of subproperties if available
+      const subs = entry.subpropertyValues[propertyId];
+      let subSum = 0;
+      let hasAnySub = false;
+      for (const sub of subDefs) {
+        if (subs[sub.id] !== undefined && typeof subs[sub.id] === 'number') {
+          subSum += subs[sub.id];
+          hasAnySub = true;
+        }
+      }
+      if (hasAnySub) {
+        actualValue = subSum;
+        hasActual = true;
+        lastKnownValue = subSum;
+      }
+    }
+
+    // Build the data point
+    const point: PropertyDataPoint = {
+      date: dateStr,
+      dayLabel,
+      value: actualValue,
+      carriedValue: actualValue !== null ? actualValue : lastKnownValue,
+      hasActualEntry: hasActual,
+    };
+
+    // Populate subproperties
+    if (subDefs.length > 0) {
+      const daySubs = entry?.subpropertyValues?.[propertyId];
+      for (const sub of subDefs) {
+        if (daySubs && daySubs[sub.id] !== undefined && typeof daySubs[sub.id] === 'number') {
+          point[sub.id] = daySubs[sub.id];
+          lastKnownSubValues[sub.id] = daySubs[sub.id];
+        } else {
+          // Carry forward subproperty value
+          point[sub.id] = lastKnownSubValues[sub.id] ?? 0;
+        }
+      }
+    }
+
+    dataPoints.push(point);
+
+    if (hasActual && actualValue !== null) {
+      recordedPoints.push({ date: dateStr, value: actualValue });
+    }
+  }
+
+  // Calculate KPIs
+  let currentValue: number | null = null;
+  let currentDate: string | undefined;
+  let previousValue: number | null = null;
+  let previousDate: string | undefined;
+  let delta = 0;
+  let deltaPercent = 0;
+  let high: number | null = null;
+  let highDate: string | undefined;
+  let low: number | null = null;
+  let lowDate: string | undefined;
+  let average: number | null = null;
+
+  if (recordedPoints.length > 0) {
+    const latest = recordedPoints[recordedPoints.length - 1];
+    currentValue = latest.value;
+    currentDate = latest.date;
+
+    const earliest = recordedPoints[0];
+    previousValue = earliest.value;
+    previousDate = earliest.date;
+
+    delta = currentValue - previousValue;
+    deltaPercent = previousValue !== 0 ? (delta / Math.abs(previousValue)) * 100 : 0;
+
+    let sum = 0;
+    for (const p of recordedPoints) {
+      sum += p.value;
+      if (high === null || p.value > high) {
+        high = p.value;
+        highDate = p.date;
+      }
+      if (low === null || p.value < low) {
+        low = p.value;
+        lowDate = p.date;
+      }
+    }
+    average = Math.round((sum / recordedPoints.length) * 100) / 100;
+  }
+
+  // Calculate latest subproperty distribution
+  const subproperties: SubpropertyBreakdown[] = [];
+  if (property.subproperties && property.subproperties.length > 0) {
+    const total = currentValue || 0;
+    property.subproperties.forEach((sub, idx) => {
+      const subVal = lastKnownSubValues[sub.id] ?? 0;
+      const pct = total > 0 ? Math.round((subVal / total) * 1000) / 10 : 0;
+      subproperties.push({
+        id: sub.id,
+        name: sub.name,
+        value: subVal,
+        percentage: pct,
+        color: getSubpropertyColor(idx),
+      });
+    });
+  }
+
+  return {
+    property,
+    dataPoints,
+    currentValue,
+    currentDate,
+    previousValue,
+    previousDate,
+    delta,
+    deltaPercent,
+    high,
+    highDate,
+    low,
+    lowDate,
+    average,
+    recordedCount: recordedPoints.length,
+    subproperties,
+  };
+}
+

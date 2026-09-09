@@ -103,6 +103,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('today');
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
+  const [analyticsPropertyId, setAnalyticsPropertyId] = useState<string | undefined>(undefined);
 
   const isToday = currentDate === getTodayString();
   const dateLabel = formatDateLabel(currentDate);
@@ -463,6 +464,10 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                   onAddSubproperty={onAddSubproperty}
                   onDeleteSubproperty={onDeleteSubproperty}
                   onOpenManageProperties={onOpenManageProperties || (() => {})}
+                  onViewAnalytics={(propId) => {
+                    setAnalyticsPropertyId(propId);
+                    setActiveTab('analytics');
+                  }}
                   isCompact={false}
                 />
 
@@ -497,7 +502,13 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
         )}
 
         {/* Tab 2: Analytics & Graphs */}
-        {activeTab === 'analytics' && <AnalyticsView data={data} />}
+        {activeTab === 'analytics' && (
+          <AnalyticsView
+            data={data}
+            initialPropertyId={analyticsPropertyId}
+            onOpenManageProperties={onOpenManageProperties}
+          />
+        )}
 
         {/* Tab 3: History & Past Archive */}
         {activeTab === 'history' && (

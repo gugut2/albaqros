@@ -34,6 +34,7 @@ interface CompactViewProps {
   onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
+  onViewAnalytics?: (propertyId?: string) => void;
 }
 
 export const CompactView: React.FC<CompactViewProps> = ({
@@ -63,6 +64,7 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onDeleteSubproperty,
   onOpenManageProperties,
   onOpenManageReminders,
+  onViewAnalytics,
 }) => {
   const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'low'>('all');
   const [isRoutineExpanded, setIsRoutineExpanded] = useState<boolean>(false);
@@ -217,6 +219,7 @@ export const CompactView: React.FC<CompactViewProps> = ({
               onAddSubproperty={onAddSubproperty}
               onDeleteSubproperty={onDeleteSubproperty}
               onOpenManageProperties={onOpenManageProperties || (() => {})}
+              onViewAnalytics={onViewAnalytics}
               isCompact={true}
             />
           </div>

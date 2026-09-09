@@ -15,6 +15,7 @@ import {
   Layers,
   Trash2,
   PieChart,
+  BarChart2,
 } from 'lucide-react';
 import { DailyPropertyDefinition, DayEntry } from '../types';
 import { formatDateLabel, getTodayString } from '../services/storage';
@@ -29,6 +30,7 @@ interface DailyPropertiesCardProps {
   onAddSubproperty?: (propertyId: string, name: string, unit?: string) => void;
   onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   onOpenManageProperties: () => void;
+  onViewAnalytics?: (propertyId?: string) => void;
   isCompact?: boolean;
 }
 
@@ -44,6 +46,7 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
   onAddSubproperty,
   onDeleteSubproperty,
   onOpenManageProperties,
+  onViewAnalytics,
   isCompact = false,
 }) => {
   const currentValues = entry?.properties || {};
@@ -167,15 +170,28 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenManageProperties}
-          className="btn-secondary"
-          style={{ fontSize: '0.725rem', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
-          title="Add or configure tracked properties"
-        >
-          <Settings2 size={12} /> Manage Metrics
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {onViewAnalytics && (
+            <button
+              type="button"
+              onClick={() => onViewAnalytics()}
+              className="btn-secondary"
+              style={{ fontSize: '0.725rem', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              title="View full charts & historical progression"
+            >
+              <BarChart2 size={12} /> Trends & Graphs
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenManageProperties}
+            className="btn-secondary"
+            style={{ fontSize: '0.725rem', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            title="Add or configure tracked properties"
+          >
+            <Settings2 size={12} /> Manage Metrics
+          </button>
+        </div>
       </div>
 
       {/* Properties Grid */}
@@ -298,6 +314,18 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                       {delta > 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
                       {delta > 0 ? `+${delta}` : delta} {prop.unit || ''}
                     </span>
+                  )}
+
+                  {onViewAnalytics && prop.type === 'number' && (
+                    <button
+                      type="button"
+                      onClick={() => onViewAnalytics(prop.id)}
+                      className="btn-icon"
+                      style={{ padding: '2px', color: 'var(--text-muted)' }}
+                      title={`View ${prop.name} analytics & graphs`}
+                    >
+                      <TrendingUp size={13} />
+                    </button>
                   )}
 
                   {hasSubprops && (
