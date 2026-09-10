@@ -20,6 +20,8 @@ import {
   Save,
   Cloud,
   Tag,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { NoteMetadata } from '../types';
 import { NotesService, extractTags, extractTitle, extractPlainTextPreview } from '../services/notesService';
@@ -33,9 +35,15 @@ import {
 
 interface NotesStudioViewProps {
   onOpenTask?: (taskId: string) => void;
+  isStudioSidebarCollapsed?: boolean;
+  onToggleStudioSidebar?: () => void;
 }
 
-export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
+export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
+  onOpenTask,
+  isStudioSidebarCollapsed = false,
+  onToggleStudioSidebar,
+}) => {
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [activeNotePath, setActiveNotePath] = useState<string | null>(null);
   const [activeContent, setActiveContent] = useState<string>('');
@@ -45,6 +53,25 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
   const [notesDir, setNotesDir] = useState<string>('');
+
+  // Collapsible Knowledge & Notes sidebar state
+  const [isNotesSidebarCollapsed, setIsNotesSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('albaqros_notes_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleNotesSidebar = () => {
+    setIsNotesSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('albaqros_notes_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Active note tags state
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -402,6 +429,13 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
       }
     }
 
+    // Quick Save shortcut: Ctrl+S or Cmd+S
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      flushSave();
+      return;
+    }
+
     // 2. Space key: Transform Markdown shortcuts (#, ##, ###, -, *) live into styled blocks
     if (e.key === ' ' || e.code === 'Space') {
       const sel = window.getSelection();
@@ -750,15 +784,16 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', backgroundColor: 'var(--bg-app)' }}>
-      {/* ─── LEFT SIDEBAR: EXPLORER & TAGS ─── */}
+      {/* ─── LEFT SIDEBAR: EXPLORER & TAGS (COLLAPSIBLE) ─── */}
       <aside
         style={{
-          width: '280px',
+          width: isNotesSidebarCollapsed ? '0px' : '280px',
           backgroundColor: '#0d1017',
-          borderRight: '1px solid var(--border-subtle)',
-          display: 'flex',
+          borderRight: isNotesSidebarCollapsed ? 'none' : '1px solid var(--border-subtle)',
+          display: isNotesSidebarCollapsed ? 'none' : 'flex',
           flexDirection: 'column',
           flexShrink: 0,
+          transition: 'width 0.2s ease',
         }}
       >
         {/* Explorer Header */}
@@ -817,6 +852,15 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
                   <FolderOpen size={14} />
                 </button>
               )}
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={toggleNotesSidebar}
+                title="Collapse Notes Explorer"
+                style={{ width: '28px', height: '28px', color: 'var(--text-muted)' }}
+              >
+                <PanelLeftClose size={15} />
+              </button>
             </div>
           </div>
 
@@ -1086,499 +1130,361 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = () => {
         </div>
       </aside>
 
-      {/* ─── RIGHT PANE: LIVE PREVIEW EDITOR (NO WRITE/PREVIEW SCHEME) ─── */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {activeNote ? (
-          <>
-            {/* Header: Note Info & Status */}
-            <div
+      {/* ─── RIGHT PANE: LIVE PREVIEW WRITING SURFACE ─── */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden', position: 'relative' }}>
+        {/* Floating Notes Explorer Toggle when collapsed */}
+        {isNotesSidebarCollapsed && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '12px',
+              left: isStudioSidebarCollapsed ? '94px' : '14px',
+              zIndex: 90,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <button
+              type="button"
+              onClick={toggleNotesSidebar}
+              title="Open Notes Explorer (Files & Folders)"
               style={{
-                padding: '12px 28px',
-                borderBottom: '1px solid var(--border-subtle)',
-                backgroundColor: 'rgba(19, 23, 31, 0.8)',
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                backgroundColor: '#161b26',
+                border: '1px solid var(--border-medium)',
+                color: 'var(--text-secondary)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#ffffff';
+                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border-medium)';
+                e.currentTarget.style.backgroundColor = '#161b26';
               }}
             >
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  <span>notes</span>
-                  {activeNote.folder && (
-                    <>
-                      <span>/</span>
-                      <span>{activeNote.folder}</span>
-                    </>
-                  )}
-                  <span>/</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>{activeNote.fileName}</span>
-                  {isSaving && (
-                    <span style={{ color: '#f59e0b', marginLeft: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      ● Saving to drive...
-                    </span>
-                  )}
-                  {!isSaving && lastSavedTime && (
-                    <span
-                      title={notesDir ? `Saved to drive in ${notesDir}\\${activeNote.relativePath}` : 'Saved to drive'}
-                      style={{
-                        color: '#10b981',
-                        marginLeft: '6px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                        padding: '1px 6px',
-                        borderRadius: '4px',
-                      }}
-                    >
-                      <Cloud size={12} />
-                      <span>Saved to drive ({lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})</span>
-                    </span>
-                  )}
-                </div>
+              <PanelLeftOpen size={14} color="#818cf8" />
+              <span>Notes</span>
+            </button>
 
-                <h1
-                  style={{
-                    fontSize: '1.3rem',
-                    fontWeight: 800,
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-display)',
-                    margin: '2px 0 0',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {activeNote.title}
-                </h1>
+            <button
+              type="button"
+              onClick={() => {
+                setNewNoteTitle('');
+                setIsNewNoteOpen(true);
+              }}
+              title="Create New Note"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                backgroundColor: '#161b26',
+                border: '1px dashed var(--border-medium)',
+                color: 'var(--text-muted)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                e.currentTarget.style.color = '#818cf8';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--border-medium)';
+                e.currentTarget.style.color = 'var(--text-muted)';
+              }}
+            >
+              <Plus size={12} />
+              <span>New</span>
+            </button>
+          </div>
+        )}
 
-                {/* ─── INTERACTIVE TAG BAR ─── */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '6px',
-                    marginTop: '8px',
-                  }}
-                >
-                  <Tag size={13} style={{ color: '#38bdf8', opacity: 0.8, marginRight: '2px' }} />
+        {activeNote ? (
+          <>
+            {/* Live-Preview Writing Surface (Everything scrolls together!) */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: isNotesSidebarCollapsed ? '48px 56px 80px' : '36px 56px 80px',
+                position: 'relative',
+              }}
+            >
+              {/* ─── SIDE-BY-SIDE TAGS (Scrolls smoothly with the note!) ─── */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '6px',
+                  marginBottom: '24px',
+                  userSelect: 'none',
+                }}
+              >
+                <Tag size={13} style={{ color: '#38bdf8', opacity: 0.75, marginRight: '2px', flexShrink: 0 }} />
 
-                  {activeTags.map((tag, idx) => {
-                    const isEditing = editingTagIndex === idx;
-                    if (isEditing) {
-                      return (
-                        <div
-                          key={`edit-${tag}-${idx}`}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '2px',
-                            backgroundColor: 'rgba(56, 189, 248, 0.18)',
-                            border: '1px solid #38bdf8',
-                            borderRadius: '999px',
-                            padding: '1px 4px 1px 8px',
-                          }}
-                        >
-                          <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 700 }}>#</span>
-                          <input
-                            type="text"
-                            value={editTagInput}
-                            onChange={(e) => setEditTagInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveEditTag(tag);
-                              if (e.key === 'Escape') {
-                                setEditingTagIndex(null);
-                                setEditTagInput('');
-                              }
-                            }}
-                            autoFocus
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#ffffff',
-                              fontSize: '0.72rem',
-                              fontWeight: 600,
-                              width: `${Math.max(60, editTagInput.length * 8 + 12)}px`,
-                              outline: 'none',
-                              padding: '0 2px',
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveEditTag(tag)}
-                            title="Confirm tag rename"
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#38bdf8',
-                              cursor: 'pointer',
-                              padding: '1px',
-                              display: 'flex',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Check size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingTagIndex(null);
-                              setEditTagInput('');
-                            }}
-                            title="Cancel"
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: 'var(--text-muted)',
-                              cursor: 'pointer',
-                              padding: '1px',
-                              display: 'flex',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      );
-                    }
-
+                {activeTags.map((tag, idx) => {
+                  const isEditing = editingTagIndex === idx;
+                  if (isEditing) {
                     return (
                       <div
-                        key={tag}
+                        key={`edit-${tag}-${idx}`}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '3px',
-                          fontSize: '0.72rem',
-                          fontWeight: 600,
-                          padding: '2px 8px',
+                          gap: '2px',
+                          backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                          border: '1px solid #38bdf8',
                           borderRadius: '999px',
-                          backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                          border: '1px solid rgba(56, 189, 248, 0.28)',
-                          color: '#38bdf8',
-                          transition: 'all 0.15s ease',
+                          padding: '1px 6px 1px 10px',
                         }}
                       >
-                        <span
-                          onClick={(e) => handleStartEditTag(idx, tag, e)}
-                          title="Click to edit/rename tag"
-                          style={{ cursor: 'pointer' }}
-                        >
-                          #{tag}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartEditTag(idx, tag, e)}
-                          title="Edit / Rename Tag"
+                        <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 700 }}>#</span>
+                        <input
+                          type="text"
+                          value={editTagInput}
+                          onChange={(e) => setEditTagInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveEditTag(tag);
+                            if (e.key === 'Escape') {
+                              setEditingTagIndex(null);
+                              setEditTagInput('');
+                            }
+                          }}
+                          autoFocus
                           style={{
                             background: 'transparent',
                             border: 'none',
-                            color: 'rgba(56, 189, 248, 0.7)',
+                            color: '#ffffff',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            width: `${Math.max(60, editTagInput.length * 8 + 12)}px`,
+                            outline: 'none',
+                            padding: '0 2px',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEditTag(tag)}
+                          title="Confirm rename"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#38bdf8',
                             cursor: 'pointer',
-                            padding: '0 1px',
+                            padding: '1px',
                             display: 'flex',
                             alignItems: 'center',
                           }}
                         >
-                          <Edit2 size={10} />
+                          <Check size={12} />
                         </button>
                         <button
                           type="button"
-                          onClick={(e) => handleRemoveTag(tag, e)}
-                          title={`Remove tag #${tag}`}
+                          onClick={() => {
+                            setEditingTagIndex(null);
+                            setEditTagInput('');
+                          }}
+                          title="Cancel"
                           style={{
                             background: 'transparent',
                             border: 'none',
-                            color: 'rgba(244, 63, 94, 0.85)',
+                            color: 'var(--text-muted)',
                             cursor: 'pointer',
-                            padding: '0 1px',
+                            padding: '1px',
                             display: 'flex',
                             alignItems: 'center',
-                            marginLeft: '1px',
                           }}
                         >
-                          <X size={11} />
+                          <X size={12} />
                         </button>
                       </div>
                     );
-                  })}
+                  }
 
-                  {/* Add Tag Button / Input */}
-                  {isAddingTag ? (
+                  return (
                     <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '2px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid var(--border-medium)',
-                        borderRadius: '999px',
-                        padding: '1px 4px 1px 8px',
-                      }}
-                    >
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>#</span>
-                      <input
-                        type="text"
-                        placeholder="new-tag..."
-                        value={newTagInput}
-                        onChange={(e) => setNewTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleAddTag();
-                          if (e.key === 'Escape') {
-                            setIsAddingTag(false);
-                            setNewTagInput('');
-                          }
-                        }}
-                        autoFocus
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#ffffff',
-                          fontSize: '0.72rem',
-                          width: '90px',
-                          outline: 'none',
-                          padding: '0 2px',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddTag()}
-                        title="Add Tag"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#10b981',
-                          cursor: 'pointer',
-                          padding: '1px',
-                          display: 'flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <Check size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsAddingTag(false);
-                          setNewTagInput('');
-                        }}
-                        title="Cancel"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          padding: '1px',
-                          display: 'flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingTag(true)}
-                      title="Add a tag to this note"
+                      key={tag}
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '3px',
                         fontSize: '0.72rem',
-                        fontWeight: 500,
-                        padding: '2px 8px',
+                        fontWeight: 600,
+                        padding: '2px 9px',
                         borderRadius: '999px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px dashed var(--border-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        color: '#38bdf8',
                         transition: 'all 0.15s ease',
                       }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.color = '#38bdf8';
-                        e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                    >
+                      <span
+                        onClick={(e) => handleStartEditTag(idx, tag, e)}
+                        title="Click to edit/rename tag"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        #{tag}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleStartEditTag(idx, tag, e)}
+                        title="Edit / Rename Tag"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'rgba(56, 189, 248, 0.65)',
+                          cursor: 'pointer',
+                          padding: '0 1px',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Edit2 size={10} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleRemoveTag(tag, e)}
+                        title={`Remove tag #${tag}`}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'rgba(244, 63, 94, 0.8)',
+                          cursor: 'pointer',
+                          padding: '0 1px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          marginLeft: '1px',
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {/* Add Tag Button / Input */}
+                {isAddingTag ? (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid var(--border-medium)',
+                      borderRadius: '999px',
+                      padding: '1px 6px 1px 10px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>#</span>
+                    <input
+                      type="text"
+                      placeholder="new-tag..."
+                      value={newTagInput}
+                      onChange={(e) => setNewTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddTag();
+                        if (e.key === 'Escape') {
+                          setIsAddingTag(false);
+                          setNewTagInput('');
+                        }
                       }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.color = 'var(--text-muted)';
-                        e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                      autoFocus
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ffffff',
+                        fontSize: '0.72rem',
+                        width: '90px',
+                        outline: 'none',
+                        padding: '0 2px',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddTag()}
+                      title="Add Tag"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#10b981',
+                        cursor: 'pointer',
+                        padding: '1px',
+                        display: 'flex',
+                        alignItems: 'center',
                       }}
                     >
-                      <Plus size={11} />
-                      <span>Tag</span>
+                      <Check size={12} />
                     </button>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingTag(false);
+                        setNewTagInput('');
+                      }}
+                      title="Cancel"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '1px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingTag(true)}
+                    title="Add a tag to this note"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                      fontSize: '0.72rem',
+                      fontWeight: 500,
+                      padding: '2px 9px',
+                      borderRadius: '999px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px dashed var(--border-subtle)',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#38bdf8';
+                      e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--text-muted)';
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                    }}
+                  >
+                    <Plus size={11} />
+                    <span>Tag</span>
+                  </button>
+                )}
               </div>
-
-              {/* Formatting Quick-Toolbar */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.025)',
-                  padding: '4px 8px',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('formatBlock', false, '<h1>');
-                    handleContentMutated();
-                  }}
-                  title="Heading 1 (#)"
-                  style={{ fontWeight: 800, fontSize: '0.82rem', padding: '2px 7px', color: '#ffffff' }}
-                >
-                  H1
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('formatBlock', false, '<h2>');
-                    handleContentMutated();
-                  }}
-                  title="Heading 2 (##)"
-                  style={{ fontWeight: 700, fontSize: '0.8rem', padding: '2px 7px', color: '#ffffff' }}
-                >
-                  H2
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('formatBlock', false, '<h3>');
-                    handleContentMutated();
-                  }}
-                  title="Heading 3 (###)"
-                  style={{ fontWeight: 600, fontSize: '0.78rem', padding: '2px 7px', color: '#ffffff' }}
-                >
-                  H3
-                </button>
-
-                <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 3px' }} />
-
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('bold');
-                    handleContentMutated();
-                  }}
-                  title="Bold"
-                  style={{ width: '26px', height: '26px' }}
-                >
-                  <Bold size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('italic');
-                    handleContentMutated();
-                  }}
-                  title="Italic"
-                  style={{ width: '26px', height: '26px' }}
-                >
-                  <Italic size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    document.execCommand('insertUnorderedList');
-                    handleContentMutated();
-                  }}
-                  title="Bullet List (-)"
-                  style={{ width: '26px', height: '26px' }}
-                >
-                  <List size={13} />
-                </button>
-
-                <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 3px' }} />
-
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    setIsLinkModalOpen(true);
-                    setLinkModalQuery('');
-                  }}
-                  title="Insert note link (or type [[ in document)"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '3px 8px',
-                    color: '#60a5fa',
-                    fontSize: '0.74rem',
-                    fontWeight: 600,
-                  }}
-                >
-                  <Link2 size={13} />
-                  <span>[[Link Note]]</span>
-                </button>
-
-                <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 3px' }} />
-
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => flushSave()}
-                  title="Save note to drive now (Ctrl+S)"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '3px 8px',
-                    color: '#10b981',
-                    fontSize: '0.74rem',
-                    fontWeight: 600,
-                  }}
-                >
-                  <Save size={13} />
-                  <span>Save</span>
-                </button>
-
-                <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 3px' }} />
-
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => handleDeleteNote(activeNote.relativePath)}
-                  title="Delete note"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '3px 8px',
-                    color: 'var(--accent-rose)',
-                    fontSize: '0.74rem',
-                    fontWeight: 600,
-                  }}
-                >
-                  <Trash2 size={13} />
-                  <span>Delete</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Live-Preview Writing Surface */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '32px 48px',
-                position: 'relative',
-              }}
-            >
               <div
                 ref={editorRef}
                 contentEditable

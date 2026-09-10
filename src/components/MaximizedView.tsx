@@ -14,6 +14,8 @@ import {
   Target,
   Edit2,
   BookOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -114,6 +116,25 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
   const [analyticsPropertyId, setAnalyticsPropertyId] = useState<string | undefined>(undefined);
 
+  // Collapsible Studio Workspace sidebar state
+  const [isStudioSidebarCollapsed, setIsStudioSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('albaqros_studio_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleStudioSidebar = () => {
+    setIsStudioSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('albaqros_studio_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const isToday = currentDate === getTodayString();
   const dateLabel = formatDateLabel(currentDate);
 
@@ -137,31 +158,50 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* Left Navigation Sidebar */}
+      {/* Left Navigation Sidebar (Collapsible) */}
       <aside
         style={{
-          width: '240px',
+          width: isStudioSidebarCollapsed ? '0px' : '230px',
           backgroundColor: '#0e1117',
-          borderRight: '1px solid var(--border-subtle)',
-          display: 'flex',
+          borderRight: isStudioSidebarCollapsed ? 'none' : '1px solid var(--border-subtle)',
+          display: isStudioSidebarCollapsed ? 'none' : 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          padding: '16px 12px',
+          padding: isStudioSidebarCollapsed ? '0px' : '16px 12px',
           flexShrink: 0,
+          transition: 'width 0.2s ease',
         }}
       >
         {/* Nav Tabs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <div
             style={{
-              fontSize: '0.7rem',
-              fontWeight: 700,
-              color: 'var(--text-muted)',
-              letterSpacing: '0.06em',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
               padding: '6px 10px',
+              marginBottom: '2px',
             }}
           >
-            STUDIO WORKSPACE
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                color: 'var(--text-muted)',
+                letterSpacing: '0.06em',
+              }}
+            >
+              STUDIO WORKSPACE
+            </span>
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={toggleStudioSidebar}
+              title="Collapse Studio Sidebar"
+              style={{ width: '24px', height: '24px', padding: 0, color: 'var(--text-muted)' }}
+            >
+              <PanelLeftClose size={15} />
+            </button>
           </div>
 
           <button
@@ -345,7 +385,58 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
       </aside>
 
       {/* Main Studio Content Area */}
-      <main style={{ flex: 1, padding: '24px', overflowY: 'auto', backgroundColor: '#0b0d11' }}>
+      <main
+        style={{
+          flex: 1,
+          padding: activeTab === 'notes' ? 0 : '24px',
+          overflowY: activeTab === 'notes' ? 'hidden' : 'auto',
+          backgroundColor: '#0b0d11',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+        }}
+      >
+        {/* Floating Toggle Button when Studio Workspace is collapsed */}
+        {isStudioSidebarCollapsed && (
+          <button
+            type="button"
+            onClick={toggleStudioSidebar}
+            title="Open Studio Workspace Sidebar"
+            style={{
+              position: 'fixed',
+              top: '40px',
+              left: '12px',
+              zIndex: 900,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              backgroundColor: '#161b26',
+              border: '1px solid var(--border-medium)',
+              color: 'var(--text-secondary)',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#ffffff';
+              e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+              e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--text-secondary)';
+              e.currentTarget.style.borderColor = 'var(--border-medium)';
+              e.currentTarget.style.backgroundColor = '#161b26';
+            }}
+          >
+            <PanelLeftOpen size={14} color="#818cf8" />
+            <span>Studio</span>
+          </button>
+        )}
+
         {/* Tab 1: Today's Focus & Journal Split View */}
         {activeTab === 'today' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
@@ -669,7 +760,10 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
 
         {activeTab === 'notes' && (
           <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
-            <NotesStudioView />
+            <NotesStudioView
+              isStudioSidebarCollapsed={isStudioSidebarCollapsed}
+              onToggleStudioSidebar={toggleStudioSidebar}
+            />
           </div>
         )}
       </main>
