@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { DailyPropertyDefinition, DayEntry } from '../types';
 import { formatDateLabel, getTodayString } from '../services/storage';
+import { getPreviousRecordedValue, getPreviousRecordedSubValue } from '../services/propertyInheritance';
 
 interface DailyPropertiesCardProps {
   currentDate: string;
@@ -69,37 +70,13 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
   };
 
   // Compute previous value for delta calculation
-  const getPreviousValue = (propId: string): { val: number | string | boolean; date: string } | null => {
-    const priorDates = Object.keys(allEntries)
-      .filter((d) => d < currentDate && allEntries[d]?.properties?.[propId] !== undefined)
-      .sort()
-      .reverse();
-
-    if (priorDates.length > 0) {
-      const prevDate = priorDates[0];
-      return {
-        val: allEntries[prevDate].properties![propId],
-        date: prevDate,
-      };
-    }
-    return null;
+  const getPreviousValue = (prop: DailyPropertyDefinition) => {
+    return getPreviousRecordedValue(allEntries, currentDate, prop);
   };
 
   // Compute previous subproperty value for individual delta calculation
-  const getPreviousSubValue = (propId: string, subId: string): { val: number; date: string } | null => {
-    const priorDates = Object.keys(allEntries)
-      .filter((d) => d < currentDate && allEntries[d]?.subpropertyValues?.[propId]?.[subId] !== undefined)
-      .sort()
-      .reverse();
-
-    if (priorDates.length > 0) {
-      const prevDate = priorDates[0];
-      const val = allEntries[prevDate].subpropertyValues![propId][subId];
-      if (typeof val === 'number') {
-        return { val, date: prevDate };
-      }
-    }
-    return null;
+  const getPreviousSubValue = (propId: string, subId: string) => {
+    return getPreviousRecordedSubValue(allEntries, currentDate, propId, subId);
   };
 
   const getPropIcon = (name: string, icon?: string) => {
@@ -209,29 +186,29 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
 
           // If it has subproperties, calculate live total sum
           let computedSum = 0;
-          let hasAnySubValue = false;
           if (hasSubprops) {
             prop.subproperties!.forEach((sp) => {
-              const val = subValues[sp.id];
-              if (typeof val === 'number' && !isNaN(val)) {
+              const raw = subValues[sp.id];
+              const val = typeof raw === 'number' ? raw : parseFloat(raw as any);
+              if (!isNaN(val)) {
                 computedSum += val;
-                hasAnySubValue = true;
               }
             });
+            computedSum = Math.round(computedSum * 100) / 100;
           }
 
-          const subTotalNum: number = hasAnySubValue
+          const subTotalNum: number = hasSubprops
             ? computedSum
             : typeof rawVal === 'number'
             ? rawVal
-            : 0;
+            : parseFloat(rawVal as any) || 0;
 
           const activeTotal = hasSubprops ? subTotalNum : rawVal;
 
           const numVal = typeof activeTotal === 'number' ? activeTotal : parseFloat(activeTotal as string);
           const hasVal = activeTotal !== undefined && activeTotal !== '';
 
-          const prev = getPreviousValue(prop.id);
+          const prev = getPreviousValue(prop);
           let delta: number | null = null;
           if (hasVal && !isNaN(numVal) && prev && typeof prev.val === 'number') {
             delta = Math.round((numVal - prev.val) * 100) / 100;
@@ -363,7 +340,10 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                       </div>
                       <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', fontFamily: 'var(--font-mono)' }}>
                         {prop.unit === '$' ? '$' : ''}
-                        {subTotalNum.toLocaleString()}
+                        {subTotalNum.toLocaleString('en-US', {
+                          minimumFractionDigits: subTotalNum % 1 === 0 ? 0 : 2,
+                          maximumFractionDigits: 2,
+                        })}
                         {prop.unit && prop.unit !== '$' ? ` ${prop.unit}` : ''}
                       </div>
                     </div>
@@ -394,7 +374,8 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                         }}
                       >
                         {prop.subproperties!.map((sp, idx) => {
-                          const val = subValues[sp.id] || 0;
+                          const raw = subValues[sp.id];
+                          const val = typeof raw === 'number' ? raw : parseFloat(raw as any) || 0;
                           const pct = subTotalNum > 0 ? (val / subTotalNum) * 100 : 0;
                           if (pct <= 0) return null;
                           return (
@@ -405,7 +386,7 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                                 backgroundColor: SUBPROP_COLORS[idx % SUBPROP_COLORS.length],
                                 height: '100%',
                               }}
-                              title={`${sp.name}: ${prop.unit === '$' ? '$' : ''}${val.toLocaleString ? val.toLocaleString() : val} (${Math.round(pct)}%)`}
+                              title={`${sp.name}: ${prop.unit === '$' ? '$' : ''}${val.toLocaleString('en-US', { minimumFractionDigits: val % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })} (${Math.round(pct)}%)`}
                             />
                           );
                         })}
@@ -424,15 +405,16 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                       }}
                     >
                       {prop.subproperties!.map((sp, idx) => {
-                        const subVal = subValues[sp.id];
+                        const rawSubVal = subValues[sp.id];
+                        const subVal = typeof rawSubVal === 'number' ? rawSubVal : (rawSubVal !== undefined && rawSubVal !== '' ? parseFloat(rawSubVal as any) : undefined);
                         const prevSub = getPreviousSubValue(prop.id, sp.id);
                         let subDelta: number | null = null;
-                        if (typeof subVal === 'number' && prevSub && typeof prevSub.val === 'number') {
+                        if (typeof subVal === 'number' && !isNaN(subVal) && prevSub && typeof prevSub.val === 'number') {
                           subDelta = Math.round((subVal - prevSub.val) * 100) / 100;
                         }
 
                         const color = SUBPROP_COLORS[idx % SUBPROP_COLORS.length];
-                        const pct = subTotalNum > 0 && typeof subVal === 'number' ? Math.round((subVal / subTotalNum) * 100) : 0;
+                        const pct = subTotalNum > 0 && typeof subVal === 'number' && !isNaN(subVal) ? Math.round((subVal / subTotalNum) * 100) : 0;
 
                         return (
                           <div
@@ -500,13 +482,14 @@ export const DailyPropertiesCard: React.FC<DailyPropertiesCardProps> = ({
                                 type="number"
                                 step="any"
                                 placeholder="0"
-                                value={subVal !== undefined ? subVal.toString() : ''}
+                                value={subValues[sp.id] !== undefined ? subValues[sp.id] : ''}
                                 onChange={(e) => {
-                                  const num = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                  const valStr = e.target.value;
+                                  const num = valStr === '' ? 0 : parseFloat(valStr);
                                   if (onUpdateSubproperty) {
-                                    onUpdateSubproperty(currentDate, prop.id, sp.id, num);
+                                    onUpdateSubproperty(currentDate, prop.id, sp.id, isNaN(num) ? 0 : num);
                                   } else {
-                                    onUpdateProperty(currentDate, prop.id, num);
+                                    onUpdateProperty(currentDate, prop.id, isNaN(num) ? 0 : num);
                                   }
                                 }}
                                 style={{

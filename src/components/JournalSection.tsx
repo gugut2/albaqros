@@ -34,51 +34,104 @@ export const JournalSection: React.FC<JournalSectionProps> = ({
   };
 
   /**
-   * Smart Bullet Management on Enter / Backspace:
-   * - Hitting Enter on a bulleted line creates a new bullet point automatically.
-   * - Hitting Enter on an empty bullet line clears the bullet and creates a clean line.
+   * Smart Bullet Management:
+   * - Typing '-' followed by Space automatically becomes a bullet point.
+   * - Hitting Enter on a bulleted line creates the next bullet point.
+   * - Hitting Enter on an empty bullet line exits the bullet list.
+   * - Hitting Backspace on an empty bullet clears it cleanly.
    */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const { selectionStart, selectionEnd, value } = textarea;
+    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
+    const lineEnd = value.indexOf('\n', selectionStart);
+    const currentLine = value.substring(lineStart, lineEnd === -1 ? value.length : lineEnd);
+
+    // 1. Typing '-' or '*' followed by Space converts into bullet '• '
+    if (e.key === ' ' || e.code === 'Space') {
+      const lineUpToCursor = value.substring(lineStart, selectionStart);
+      const match = lineUpToCursor.match(/^(\s*)([-*])$/);
+      if (match) {
+        e.preventDefault();
+        const indent = match[1];
+        const replacement = `${indent}• `;
+        const newValue = value.substring(0, lineStart) + replacement + value.substring(selectionEnd);
+        setContent(newValue);
+        setIsSaved(false);
+        onUpdateJournal(dateStr, newValue);
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            const pos = lineStart + replacement.length;
+            textareaRef.current.setSelectionRange(pos, pos);
+            setIsSaved(true);
+          }
+        });
+        return;
+      }
+    }
+
+    // 2. Hitting Enter on a bulleted line
     if (e.key === 'Enter') {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      const { selectionStart, selectionEnd, value } = textarea;
-      const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
-      const lineEnd = value.indexOf('\n', selectionStart);
-      const currentLine = value.substring(lineStart, lineEnd === -1 ? value.length : lineEnd);
-
-      // Check if current line starts with bullet • or - or *
-      const bulletMatch = currentLine.match(/^(\s*)(•|-|\*)\s+/);
+      const bulletMatch = currentLine.match(/^(\s*)([•\-*])\s*(.*)$/);
       if (bulletMatch) {
         e.preventDefault();
         const indent = bulletMatch[1];
-        const trimmed = currentLine.trim();
+        const bulletText = bulletMatch[3].trim();
 
-        // If line contains ONLY the bullet symbol, exit bullet mode on Enter
-        if (trimmed === '•' || trimmed === '-' || trimmed === '*') {
+        // If bullet has no text (empty bullet), exit bullet list
+        if (!bulletText) {
           const newValue = value.substring(0, lineStart) + value.substring(selectionStart);
           setContent(newValue);
           setIsSaved(false);
           onUpdateJournal(dateStr, newValue);
-          setTimeout(() => {
-            textarea.selectionStart = textarea.selectionEnd = lineStart;
-            setIsSaved(true);
-          }, 0);
+          requestAnimationFrame(() => {
+            if (textareaRef.current) {
+              textareaRef.current.focus();
+              textareaRef.current.setSelectionRange(lineStart, lineStart);
+              setIsSaved(true);
+            }
+          });
           return;
         }
 
-        // Insert new bullet on next line
-        const bulletText = `\n${indent}• `;
-        const newValue = value.substring(0, selectionStart) + bulletText + value.substring(selectionEnd);
+        // Auto-continue to next bullet
+        const nextBullet = `\n${indent}• `;
+        const newValue = value.substring(0, selectionStart) + nextBullet + value.substring(selectionEnd);
         setContent(newValue);
         setIsSaved(false);
         onUpdateJournal(dateStr, newValue);
 
-        setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd = selectionStart + bulletText.length;
-          setIsSaved(true);
-        }, 0);
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            const nextPos = selectionStart + nextBullet.length;
+            textareaRef.current.setSelectionRange(nextPos, nextPos);
+            setIsSaved(true);
+          }
+        });
+        return;
+      }
+    }
+
+    // 3. Hitting Backspace on an empty bullet removes it
+    if (e.key === 'Backspace') {
+      const lineUpToCursor = value.substring(lineStart, selectionStart);
+      if (/^(\s*)([•\-*])\s*$/.test(lineUpToCursor)) {
+        e.preventDefault();
+        const newValue = value.substring(0, lineStart) + value.substring(selectionEnd);
+        setContent(newValue);
+        setIsSaved(false);
+        onUpdateJournal(dateStr, newValue);
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.setSelectionRange(lineStart, lineStart);
+            setIsSaved(true);
+          }
+        });
       }
     }
   };

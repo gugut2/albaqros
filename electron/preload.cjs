@@ -34,4 +34,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('updater-status', listener);
     return () => ipcRenderer.removeListener('updater-status', listener);
   },
+  notes: {
+    listNotes: () => ipcRenderer.invoke('notes-list'),
+    readNote: (relativePath) => ipcRenderer.invoke('notes-read', relativePath),
+    writeNote: (relativePath, content) => ipcRenderer.invoke('notes-write', { relativePath, content }),
+    createNote: (title, folder, content) => ipcRenderer.invoke('notes-create', { title, folder, content }),
+    deleteNote: (relativePath) => ipcRenderer.invoke('notes-delete', relativePath),
+    renameNote: (oldRelativePath, newTitle, newFolder) =>
+      ipcRenderer.invoke('notes-rename', { oldRelativePath, newTitle, newFolder }),
+    createFolder: (folderPath) => ipcRenderer.invoke('notes-create-folder', folderPath),
+    openNotesFolder: (relativePath) => ipcRenderer.invoke('notes-open-folder', relativePath),
+  },
 });

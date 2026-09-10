@@ -184,3 +184,23 @@ export interface UpdateInfo {
   releaseDate?: string;
   releaseNotes?: string;
 }
+
+export interface NoteMetadata {
+  id: string; // unique relative path or slug, e.g. "learning/shader-basics.md"
+  title: string; // Title extracted from # Heading or filename
+  fileName: string; // e.g. "shader-basics.md"
+  relativePath: string; // relative to vault notes/ directory, e.g. "learning/shader-basics.md"
+  folder: string; // e.g. "learning" or "" for root
+  tags: string[]; // extracted from content (#tag) or frontmatter
+  preview: string; // short text preview for list view
+  createdAt: string; // ISO date string
+  updatedAt: string; // ISO date string
+  size?: number; // File size in bytes
+  linkedTasks?: string[]; // IDs of linked tasks
+  linkedMajorTasks?: string[]; // IDs of linked major projects
+}
+
+export interface Note extends NoteMetadata {
+  content: string; // Raw markdown text
+}
+

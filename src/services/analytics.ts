@@ -309,6 +309,7 @@ export function calculatePropertyAnalytics(
   // Pre-fetch any historical value prior to the start of the dateList for carry-forward
   let lastKnownValue: number | null = null;
   const lastKnownSubValues: Record<string, number> = {};
+  const subDefs = property.subproperties || [];
 
   const priorDates = Object.keys(entries)
     .filter((d) => d < dateList[0])
@@ -316,16 +317,31 @@ export function calculatePropertyAnalytics(
 
   for (const pDate of priorDates) {
     const ent = entries[pDate];
-    if (ent?.properties?.[propertyId] !== undefined) {
-      const v = Number(ent.properties[propertyId]);
-      if (!isNaN(v)) lastKnownValue = v;
-    }
-    if (ent?.subpropertyValues?.[propertyId]) {
-      const subs = ent.subpropertyValues[propertyId];
-      for (const [subId, sVal] of Object.entries(subs)) {
-        if (typeof sVal === 'number' && !isNaN(sVal)) {
-          lastKnownSubValues[subId] = sVal;
+    if (subDefs.length > 0) {
+      if (ent?.subpropertyValues?.[propertyId]) {
+        const subs = ent.subpropertyValues[propertyId];
+        for (const [subId, sVal] of Object.entries(subs)) {
+          const num = typeof sVal === 'number' ? sVal : parseFloat(sVal as any);
+          if (!isNaN(num)) {
+            lastKnownSubValues[subId] = num;
+          }
         }
+      }
+      let subSum = 0;
+      let hasAnySub = false;
+      for (const sub of subDefs) {
+        if (lastKnownSubValues[sub.id] !== undefined) {
+          subSum += lastKnownSubValues[sub.id];
+          hasAnySub = true;
+        }
+      }
+      if (hasAnySub) {
+        lastKnownValue = Math.round(subSum * 100) / 100;
+      }
+    } else {
+      if (ent?.properties?.[propertyId] !== undefined) {
+        const v = Number(ent.properties[propertyId]);
+        if (!isNaN(v)) lastKnownValue = v;
       }
     }
   }
@@ -345,31 +361,42 @@ export function calculatePropertyAnalytics(
     let actualValue: number | null = null;
     let hasActual = false;
 
-    // Check if property has subproperties
-    const subDefs = property.subproperties || [];
-
-    if (entry?.properties?.[propertyId] !== undefined) {
-      const rawVal = Number(entry.properties[propertyId]);
-      if (!isNaN(rawVal)) {
-        actualValue = rawVal;
-        hasActual = true;
-        lastKnownValue = rawVal;
-      }
-    } else if (subDefs.length > 0 && entry?.subpropertyValues?.[propertyId]) {
-      // Calculate sum of subproperties if available
-      const subs = entry.subpropertyValues[propertyId];
-      let subSum = 0;
-      let hasAnySub = false;
-      for (const sub of subDefs) {
-        if (subs[sub.id] !== undefined && typeof subs[sub.id] === 'number') {
-          subSum += subs[sub.id];
-          hasAnySub = true;
+    if (subDefs.length > 0) {
+      // For compound properties, calculate sum of defined subproperties
+      const daySubs = entry?.subpropertyValues?.[propertyId];
+      if (daySubs) {
+        for (const sub of subDefs) {
+          const raw = daySubs[sub.id];
+          const num = typeof raw === 'number' ? raw : parseFloat(raw as any);
+          if (!isNaN(num)) {
+            lastKnownSubValues[sub.id] = num;
+            hasActual = true;
+          }
         }
       }
-      if (hasAnySub) {
-        actualValue = subSum;
-        hasActual = true;
-        lastKnownValue = subSum;
+      if (hasActual) {
+        let currentSubSum = 0;
+        for (const sub of subDefs) {
+          currentSubSum += lastKnownSubValues[sub.id] ?? 0;
+        }
+        actualValue = Math.round(currentSubSum * 100) / 100;
+        lastKnownValue = actualValue;
+      } else if (entry?.properties?.[propertyId] !== undefined) {
+        const rawVal = Number(entry.properties[propertyId]);
+        if (!isNaN(rawVal)) {
+          actualValue = rawVal;
+          hasActual = true;
+          lastKnownValue = rawVal;
+        }
+      }
+    } else {
+      if (entry?.properties?.[propertyId] !== undefined) {
+        const rawVal = Number(entry.properties[propertyId]);
+        if (!isNaN(rawVal)) {
+          actualValue = rawVal;
+          hasActual = true;
+          lastKnownValue = rawVal;
+        }
       }
     }
 
@@ -384,15 +411,8 @@ export function calculatePropertyAnalytics(
 
     // Populate subproperties
     if (subDefs.length > 0) {
-      const daySubs = entry?.subpropertyValues?.[propertyId];
       for (const sub of subDefs) {
-        if (daySubs && daySubs[sub.id] !== undefined && typeof daySubs[sub.id] === 'number') {
-          point[sub.id] = daySubs[sub.id];
-          lastKnownSubValues[sub.id] = daySubs[sub.id];
-        } else {
-          // Carry forward subproperty value
-          point[sub.id] = lastKnownSubValues[sub.id] ?? 0;
-        }
+        point[sub.id] = lastKnownSubValues[sub.id] ?? 0;
       }
     }
 

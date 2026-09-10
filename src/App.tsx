@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact, VaultInfo } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { processDayRollover } from './services/recurrence';
+import { getEffectiveDayEntry, getEffectiveSubpropertyValues } from './services/propertyInheritance';
 import { TitleBar } from './components/TitleBar';
 import { CompactView } from './components/CompactView';
 import { MaximizedView } from './components/MaximizedView';
@@ -53,7 +54,7 @@ export const App: React.FC = () => {
 
       setData(updatedData);
       setAlwaysOnTop(loaded.settings?.alwaysOnTop || false);
-      setIsCompact(loaded.settings?.compactMode ?? true);
+      setIsCompact(true); // Always open in widget mode on app launch
 
       // Load active vault metadata
       const vInfo = await StorageService.getVaultInfo();
@@ -98,23 +99,10 @@ export const App: React.FC = () => {
     });
   };
 
-  if (!data) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          backgroundColor: 'var(--bg-app)',
-          color: 'var(--text-secondary)',
-          fontFamily: 'var(--font-main)',
-        }}
-      >
-        Loading Albaqros...
-      </div>
-    );
-  }
+  const currentDayEntry = useMemo(() => {
+    if (!data) return undefined;
+    return getEffectiveDayEntry(data.entries || {}, currentDate, data.dailyProperties || []);
+  }, [data, currentDate]);
 
   // --- Task Handlers ---
 
@@ -758,17 +746,39 @@ export const App: React.FC = () => {
         energyLevel: 3,
         updatedAt: new Date().toISOString(),
       };
+
+      // Get baseline subproperties from prior days if this date didn't have them yet
+      const propDef = (prev.dailyProperties || []).find((p) => p.id === propertyId);
+      const effectiveSubs = getEffectiveSubpropertyValues(
+        prev.entries || {},
+        dateStr,
+        propertyId,
+        propDef?.subproperties
+      );
+
       const currentSubpropValues = { ...(currentEntry.subpropertyValues || {}) };
-      const currentPropSubValues = { ...(currentSubpropValues[propertyId] || {}) };
+      const currentPropSubValues = {
+        ...effectiveSubs,
+        ...(currentSubpropValues[propertyId] || {}),
+      };
 
       currentPropSubValues[subpropertyId] = value;
       currentSubpropValues[propertyId] = currentPropSubValues;
 
-      // Automatically recompute total sum across all subproperties
-      const computedSum = Object.values(currentPropSubValues).reduce(
-        (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
-        0
-      );
+      // Automatically recompute total sum strictly across defined subproperties
+      let computedSum = 0;
+      if (propDef?.subproperties && propDef.subproperties.length > 0) {
+        propDef.subproperties.forEach((sp) => {
+          const raw = currentPropSubValues[sp.id];
+          const num = typeof raw === 'number' ? raw : parseFloat(raw as any);
+          if (!isNaN(num)) computedSum += num;
+        });
+      } else {
+        const raw = currentPropSubValues[subpropertyId];
+        const num = typeof raw === 'number' ? raw : parseFloat(raw as any);
+        if (!isNaN(num)) computedSum = num;
+      }
+      computedSum = Math.round(computedSum * 100) / 100;
 
       const currentProps = { ...(currentEntry.properties || {}) };
       currentProps[propertyId] = computedSum;
@@ -810,11 +820,14 @@ export const App: React.FC = () => {
   const handleDeleteSubproperty = (propertyId: string, subpropertyId: string) => {
     updateData((prev) => {
       const existingList = prev.dailyProperties || [];
+      const targetProp = existingList.find((p) => p.id === propertyId);
+      const remainingSubs = (targetProp?.subproperties || []).filter((s) => s.id !== subpropertyId);
+
       const updatedList = existingList.map((prop) => {
         if (prop.id !== propertyId) return prop;
         return {
           ...prop,
-          subproperties: (prop.subproperties || []).filter((s) => s.id !== subpropertyId),
+          subproperties: remainingSubs,
         };
       });
 
@@ -824,10 +837,14 @@ export const App: React.FC = () => {
         if (entry.subpropertyValues?.[propertyId]?.[subpropertyId] !== undefined) {
           const updatedSubprops = { ...entry.subpropertyValues[propertyId] };
           delete updatedSubprops[subpropertyId];
-          const newSum = Object.values(updatedSubprops).reduce(
-            (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
-            0
-          );
+          let newSum = 0;
+          remainingSubs.forEach((sp) => {
+            const raw = updatedSubprops[sp.id];
+            const num = typeof raw === 'number' ? raw : parseFloat(raw as any);
+            if (!isNaN(num)) newSum += num;
+          });
+          newSum = Math.round(newSum * 100) / 100;
+
           updatedEntries[dateKey] = {
             ...entry,
             properties: {
@@ -1017,7 +1034,23 @@ export const App: React.FC = () => {
     setCurrentDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`);
   };
 
-  const currentDayEntry = data.entries[currentDate];
+  if (!data) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          backgroundColor: 'var(--bg-app)',
+          color: 'var(--text-secondary)',
+          fontFamily: 'var(--font-main)',
+        }}
+      >
+        Loading Albaqros...
+      </div>
+    );
+  }
 
   return (
     <div

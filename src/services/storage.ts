@@ -334,23 +334,6 @@ export const StorageService = {
           data.dailyReminders = DEFAULT_DAILY_REMINDERS;
         }
 
-        // Ensure subproperty values for today exist if Investments is tracked
-        const todayStr = getTodayString();
-        if (data.entries && data.entries[todayStr] && !data.entries[todayStr].subpropertyValues?.['prop-investments']) {
-          data.entries[todayStr].subpropertyValues = {
-            ...(data.entries[todayStr].subpropertyValues || {}),
-            'prop-investments': {
-              'subprop-stocks': 12000,
-              'subprop-etf': 5000,
-              'subprop-crypto': 1500,
-            },
-          };
-          data.entries[todayStr].properties = {
-            ...(data.entries[todayStr].properties || {}),
-            'prop-investments': 18500,
-          };
-        }
-
         return data;
       }
     } catch (err) {

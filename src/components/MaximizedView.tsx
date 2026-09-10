@@ -13,6 +13,7 @@ import {
   Sparkles,
   Target,
   Edit2,
+  BookOpen,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -20,6 +21,7 @@ import { JournalSection } from './JournalSection';
 import { AnalyticsView } from './AnalyticsView';
 import { HistoryView } from './HistoryView';
 import { MajorTasksView } from './MajorTasksView';
+import { NotesStudioView } from './NotesStudioView';
 import { DailyRemindersCard } from './DailyRemindersCard';
 import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
@@ -66,7 +68,7 @@ interface MaximizedViewProps {
   onOpenManageReminders?: () => void;
 }
 
-type StudioTab = 'today' | 'major' | 'analytics' | 'history' | 'recurring';
+type StudioTab = 'today' | 'major' | 'notes' | 'analytics' | 'history' | 'recurring';
 
 export const MaximizedView: React.FC<MaximizedViewProps> = ({
   currentDate,
@@ -221,6 +223,29 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                 {data.majorTasks?.length}
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('notes')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              backgroundColor: activeTab === 'notes' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+              color: activeTab === 'notes' ? '#ffffff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'notes' ? 600 : 500,
+              fontSize: '0.85rem',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <BookOpen size={16} color={activeTab === 'notes' ? '#818cf8' : 'currentColor'} />
+            Notes & Knowledge
           </button>
 
           <button
@@ -639,6 +664,12 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'notes' && (
+          <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+            <NotesStudioView />
           </div>
         )}
       </main>

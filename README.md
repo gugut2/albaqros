@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/gugut2/albaqros?color=6366f1&label=Download%20Installer)](https://github.com/gugut2/albaqros/releases/latest)
 [![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/gugut2/albaqros/releases/latest)
 
-📥 **[Download Latest Installer (Albaqros Setup v1.1.0)](https://github.com/gugut2/albaqros/releases/download/v1.1.0/Albaqros.Setup.1.1.0.exe)**
+📥 **[Download Latest Installer (Albaqros Setup v1.2.0)](https://github.com/gugut2/albaqros/releases/download/v1.2.0/Albaqros.Setup.1.2.0.exe)**
 
 Albaqros is a local-first desktop productivity application built with **Electron**, **React**, **Vite**, and **TypeScript**. It balances deep-focus daily execution with high-level milestone progress, historical reflection, and visual analytics in a tailored dark-mode interface.
 
@@ -120,6 +120,23 @@ Albaqros is a local-first desktop productivity application built with **Electron
 - **Unified TitleBar & Vault Manager**:
   - Quick-glance clickable vault pill directly in the TitleBar (`📁 MyVault • 🟢 Synced`).
   - Dedicated Vault Management Modal with cloud provider auto-detection (`☁️ OneDrive`, `☁️ Google Drive`, `☁️ Dropbox`, `💻 Local`), "Open in Explorer", "Sync Now", and a recent vaults switcher.
+
+---
+
+### 9. 📝 Knowledge & Notes Studio (v1.2.0)
+- **Obsidian & Standard Markdown Compatible**:
+  - Genuine `.md` files saved directly to `notes/` inside your active vault on Google Drive or local storage.
+- **Live-Preview Writing Surface**:
+  - Clean WYSIWYG editing without cumbersome split-screen lag.
+  - Markdown shortcuts live formatting: `#` for H1, `##` for H2, `###` for H3, `-` for bullet lists.
+- **Bi-Directional Wikilinks (`[[Note Name]]`)**:
+  - Type `[[` anywhere to bring up an intelligent inline autocomplete suggestions popup.
+  - Backlinks graph index automatically discovers all inbound connections to the current note.
+- **Interactive Tag Management & YAML Frontmatter**:
+  - Standard YAML frontmatter tag preservation.
+  - Header Tag Bar: 1-click **Add (+ Tag)**, **Edit / Rename**, and **Remove (×)** tags.
+  - Auto-discovers `#tags` typed in note body and aggregates them with frontmatter tags.
+  - Case-safe Windows filesystem resolution and safe deletion guarantees.
 
 ---
 

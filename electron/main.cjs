@@ -243,7 +243,24 @@ function createWindow() {
   mainWindow.setPosition(screenWidth - 440, Math.max(40, Math.floor((screenHeight - 680) / 2)));
 
   const distPath = path.join(__dirname, '../dist/index.html');
-  const isDev = Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development');
+  const isDev = !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development');
+
+  mainWindow.webContents.on('console-message', (e, level, message, line, sourceId) => {
+    console.log(`[Renderer]: ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('did-fail-load', (e, errorCode, errorDescription) => {
+    console.warn(`[Electron] Failed to load URL, retrying in 1s (${errorCode}: ${errorDescription})`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (isDev) {
+          mainWindow.loadURL('http://localhost:5173');
+        } else if (fs.existsSync(distPath)) {
+          mainWindow.loadFile(distPath);
+        }
+      }
+    }, 1000);
+  });
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
@@ -269,8 +286,10 @@ ipcMain.handle('window-close', () => {
 ipcMain.handle('window-toggle-mode', (_, targetMode) => {
   if (!mainWindow) return isCompact;
 
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  // Identify the exact display that mainWindow is currently located on
+  const currentBounds = mainWindow.getBounds();
+  const currentDisplay = screen.getDisplayMatching(currentBounds);
+  const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = currentDisplay.workArea;
 
   if (targetMode !== undefined) {
     isCompact = targetMode === 'compact';
@@ -279,17 +298,21 @@ ipcMain.handle('window-toggle-mode', (_, targetMode) => {
   }
 
   if (isCompact) {
-    // Switch to Compact Floating Widget
+    // Switch to Compact Floating Widget on the CURRENT monitor
+    const targetW = 420;
+    const targetH = 680;
+    const targetX = displayX + screenWidth - 440;
+    const targetY = displayY + Math.max(40, Math.floor((screenHeight - targetH) / 2));
     mainWindow.setResizable(true);
-    mainWindow.setSize(420, 680, true);
-    mainWindow.setPosition(screenWidth - 440, Math.max(40, Math.floor((screenHeight - 680) / 2)), true);
+    mainWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH }, true);
   } else {
-    // Switch to Maximized Studio Mode
+    // Switch to Maximized Studio Mode on the CURRENT monitor (never jump to other monitor)
     const targetW = Math.min(1240, screenWidth - 100);
     const targetH = Math.min(840, screenHeight - 80);
+    const targetX = displayX + Math.max(20, Math.floor((screenWidth - targetW) / 2));
+    const targetY = displayY + Math.max(20, Math.floor((screenHeight - targetH) / 2));
     mainWindow.setResizable(true);
-    mainWindow.setSize(targetW, targetH, true);
-    mainWindow.center();
+    mainWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH }, true);
   }
 
   return isCompact;
@@ -661,6 +684,326 @@ ipcMain.handle('show-item-in-folder', (_, filePath) => {
     return true;
   } catch (err) {
     console.error('Failed to show item in folder:', err);
+    return false;
+  }
+});
+
+// ==========================================
+// Vault Notes & Markdown System IPCs
+// ==========================================
+
+function getVaultNotesDirectory() {
+  const vaultDir = getActiveVaultDirectory();
+  const notesDir = path.join(vaultDir, 'notes');
+  if (!fs.existsSync(notesDir)) {
+    try {
+      fs.mkdirSync(notesDir, { recursive: true });
+    } catch (e) {
+      console.error('Error creating notes directory:', e);
+    }
+  }
+  return notesDir;
+}
+
+function parseNoteTags(content) {
+  const tags = new Set();
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  let body = content;
+
+  if (fmMatch) {
+    body = content.substring(fmMatch[0].length);
+    const fmLines = fmMatch[1].split('\n');
+    let inTags = false;
+    for (const fLine of fmLines) {
+      const fTrim = fLine.trim();
+      if (fTrim.startsWith('tags:')) {
+        const inline = fTrim.replace(/^tags:\s*/, '').trim();
+        if (inline.startsWith('[') && inline.endsWith(']')) {
+          inline
+            .slice(1, -1)
+            .split(',')
+            .forEach((t) => {
+              const clean = t.trim().replace(/^['"#]+|['"]+$/g, '').toLowerCase();
+              if (clean) tags.add(clean);
+            });
+          inTags = false;
+        } else {
+          inTags = true;
+        }
+      } else if (inTags && fTrim.startsWith('- ')) {
+        const clean = fTrim.replace(/^-\s*/, '').replace(/^['"#]+|['"]+$/g, '').toLowerCase();
+        if (clean) tags.add(clean);
+      } else if (inTags && fTrim.includes(':')) {
+        inTags = false;
+      }
+    }
+  }
+
+  const lines = body.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith('# ') ||
+      trimmed.startsWith('## ') ||
+      trimmed.startsWith('### ') ||
+      trimmed.startsWith('#### ') ||
+      trimmed.startsWith('##### ') ||
+      trimmed.startsWith('###### ')
+    ) {
+      continue;
+    }
+    const matches = line.match(/(?:^|\s)#([a-zA-Z0-9_\-\/]+)/g);
+    if (matches) {
+      for (const m of matches) {
+        const tag = m.trim().replace(/^#/, '').toLowerCase();
+        if (tag && !/^\d+$/.test(tag)) {
+          tags.add(tag);
+        }
+      }
+    }
+  }
+  return Array.from(tags);
+}
+
+function parseNoteTitle(content, fallbackName) {
+  const match = content.match(/^#\s+(.+)$/m);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return fallbackName.replace(/\.md$/i, '');
+}
+
+function scanNotesRecursively(dir, baseDir) {
+  let results = [];
+  if (!fs.existsSync(dir)) return results;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results = results.concat(scanNotesRecursively(fullPath, baseDir));
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+      try {
+        const relativePath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
+        const folder = path.dirname(relativePath).replace(/\\/g, '/');
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const stats = fs.statSync(fullPath);
+        const title = parseNoteTitle(content, entry.name);
+        const tags = parseNoteTags(content);
+
+        const plainText = content
+          .replace(/^#+\s+/gm, '')
+          .replace(/\[\[(.*?)\]\]/g, '$1')
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+          .replace(/[*_~`>]/g, '')
+          .trim();
+        const preview = plainText.slice(0, 150).replace(/\s+/g, ' ');
+
+        results.push({
+          id: relativePath,
+          title,
+          fileName: entry.name,
+          relativePath,
+          folder: folder === '.' ? '' : folder,
+          tags,
+          preview,
+          createdAt: stats.birthtime ? stats.birthtime.toISOString() : new Date().toISOString(),
+          updatedAt: stats.mtime ? stats.mtime.toISOString() : new Date().toISOString(),
+          size: stats.size,
+        });
+      } catch (err) {
+        console.error('Error reading note file:', fullPath, err);
+      }
+    }
+  }
+  return results;
+}
+
+ipcMain.handle('notes-list', async () => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const files = fs.readdirSync(notesDir);
+    if (files.length === 0) {
+      const welcomePath = path.join(notesDir, 'Welcome to Albaqros Notes.md');
+      const welcomeContent = `# Welcome to Albaqros Notes
+
+Welcome to your personal **Notes & Knowledge Hub**! Everything you write is saved as genuine \`.md\` Markdown files directly inside your active Vault.
+
+## Quick Tour
+- [x] Full Markdown support (headers, bold, lists, and code blocks)
+- [ ] Connect thoughts using **[[Wikilinks]]** (type \`[[\` in edit mode)
+- [ ] Organize topics with tags like #learning #skills #gamedev #ideas
+- [ ] Press \`Ctrl+E\` to toggle between **Edit Mode** and **Preview Mode**
+
+## Obsidian & Cloud Storage Ready
+Your notes reside directly in:
+\`${notesDir}\`
+
+You can open this folder inside Obsidian, VS Code, or let Google Drive / OneDrive sync your knowledge base automatically.
+`;
+      try {
+        fs.writeFileSync(welcomePath, welcomeContent, 'utf-8');
+      } catch (e) {}
+    }
+
+    const notes = scanNotesRecursively(notesDir, notesDir);
+    return { success: true, notes, notesDir };
+  } catch (err) {
+    console.error('Error listing notes:', err);
+    return { success: false, error: err.message, notes: [] };
+  }
+});
+
+ipcMain.handle('notes-read', async (_, relativePath) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const safePath = path.normalize(path.join(notesDir, relativePath));
+    if (!safePath.toLowerCase().startsWith(notesDir.toLowerCase())) {
+      return { success: false, error: 'Access denied: path outside notes directory' };
+    }
+    if (!fs.existsSync(safePath)) {
+      return { success: false, error: 'Note file not found' };
+    }
+    const content = fs.readFileSync(safePath, 'utf-8');
+    const stats = fs.statSync(safePath);
+    return {
+      success: true,
+      content,
+      relativePath,
+      fileName: path.basename(safePath),
+      fullPath: safePath,
+      updatedAt: stats.mtime ? stats.mtime.toISOString() : new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error('Error reading note:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-write', async (_, { relativePath, content }) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const safePath = path.normalize(path.join(notesDir, relativePath));
+    if (!safePath.toLowerCase().startsWith(notesDir.toLowerCase())) {
+      return { success: false, error: 'Access denied: path outside notes directory' };
+    }
+    const dir = path.dirname(safePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    lastLocalSaveTime = Date.now();
+    fs.writeFileSync(safePath, content, 'utf-8');
+    return { success: true, relativePath, fullPath: safePath };
+  } catch (err) {
+    console.error('Error writing note:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-create', async (_, { title, folder, content }) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const cleanTitle = (title || 'Untitled Note').replace(/[\\/:*?"<>|]/g, '').trim();
+    let fileName = cleanTitle.endsWith('.md') ? cleanTitle : `${cleanTitle}.md`;
+    const targetFolder = folder ? folder.trim().replace(/^[/\\]+|[/\\]+$/g, '') : '';
+    const targetDir = targetFolder ? path.join(notesDir, targetFolder) : notesDir;
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    let filePath = path.join(targetDir, fileName);
+    let counter = 1;
+    const baseName = fileName.replace(/\.md$/i, '');
+    while (fs.existsSync(filePath)) {
+      fileName = `${baseName} (${counter}).md`;
+      filePath = path.join(targetDir, fileName);
+      counter++;
+    }
+
+    const defaultContent = content !== undefined ? content : `# ${cleanTitle}\n\n`;
+    lastLocalSaveTime = Date.now();
+    fs.writeFileSync(filePath, defaultContent, 'utf-8');
+    const relativePath = path.relative(notesDir, filePath).replace(/\\/g, '/');
+    return { success: true, relativePath, fileName, content: defaultContent, fullPath: filePath };
+  } catch (err) {
+    console.error('Error creating note:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-delete', async (_, relativePath) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const safePath = path.normalize(path.join(notesDir, relativePath));
+    if (!safePath.toLowerCase().startsWith(notesDir.toLowerCase())) {
+      return { success: false, error: 'Access denied: path outside notes directory' };
+    }
+    if (fs.existsSync(safePath)) {
+      lastLocalSaveTime = Date.now();
+      fs.unlinkSync(safePath);
+      return { success: true };
+    }
+    return { success: false, error: 'File does not exist' };
+  } catch (err) {
+    console.error('Error deleting note:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-rename', async (_, { oldRelativePath, newTitle, newFolder }) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const oldSafePath = path.normalize(path.join(notesDir, oldRelativePath));
+    if (!oldSafePath.toLowerCase().startsWith(notesDir.toLowerCase()) || !fs.existsSync(oldSafePath)) {
+      return { success: false, error: 'Original note not found' };
+    }
+    const cleanTitle = (newTitle || path.basename(oldRelativePath, '.md')).replace(/[\\/:*?"<>|]/g, '').trim();
+    const fileName = `${cleanTitle}.md`;
+    const targetFolder = newFolder !== undefined ? newFolder.trim().replace(/^[/\\]+|[/\\]+$/g, '') : path.dirname(oldRelativePath);
+    const targetDir = targetFolder && targetFolder !== '.' ? path.join(notesDir, targetFolder) : notesDir;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const newSafePath = path.join(targetDir, fileName);
+    lastLocalSaveTime = Date.now();
+    fs.renameSync(oldSafePath, newSafePath);
+    const newRelativePath = path.relative(notesDir, newSafePath).replace(/\\/g, '/');
+    return { success: true, relativePath: newRelativePath, fileName, fullPath: newSafePath };
+  } catch (err) {
+    console.error('Error renaming note:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-create-folder', async (_, folderPath) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const safePath = path.normalize(path.join(notesDir, folderPath));
+    if (!safePath.toLowerCase().startsWith(notesDir.toLowerCase())) {
+      return { success: false, error: 'Access denied' };
+    }
+    if (!fs.existsSync(safePath)) {
+      fs.mkdirSync(safePath, { recursive: true });
+    }
+    return { success: true, folder: path.relative(notesDir, safePath).replace(/\\/g, '/') };
+  } catch (err) {
+    console.error('Error creating folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes-open-folder', async (_, relativePath) => {
+  try {
+    const notesDir = getVaultNotesDirectory();
+    const target = relativePath ? path.join(notesDir, relativePath) : notesDir;
+    if (fs.existsSync(target)) {
+      await shell.openPath(target);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Error opening notes folder:', err);
     return false;
   }
 });

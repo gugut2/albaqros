@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Calendar,
   CheckCircle2,
@@ -20,6 +20,7 @@ import {
 import { AppData, Task } from '../types';
 import { formatDateLabel } from '../services/storage';
 import { isReminderDueOnDate } from '../services/recurrence';
+import { getEffectiveDayEntry, getEffectivePropertyValue } from '../services/propertyInheritance';
 
 interface HistoryViewProps {
   data: AppData;
@@ -71,7 +72,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [newTaskTheme, setNewTaskTheme] = useState<string>('Work');
 
   const dayTasks = data.tasks.filter((t) => t.date === selectedDate && !t.archived);
-  const dayEntry = data.entries[selectedDate];
+  const dayEntry = useMemo(
+    () => getEffectiveDayEntry(data.entries, selectedDate, data.dailyProperties || []),
+    [data.entries, selectedDate, data.dailyProperties]
+  );
 
   const completedCount = dayTasks.filter((t) => t.completed).length;
   const currentEnergy = dayEntry?.energyLevel || 3;
@@ -171,16 +175,30 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{dateStr}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {data.entries[dateStr]?.properties?.['prop-investments'] !== undefined && (
-                  <span style={{ fontSize: '0.675rem', color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.12)', padding: '1px 4px', borderRadius: '3px', fontWeight: 600 }}>
-                    ${Number(data.entries[dateStr].properties!['prop-investments']).toLocaleString()}
-                  </span>
-                )}
-                {data.entries[dateStr]?.properties?.['prop-weight'] && (
-                  <span style={{ fontSize: '0.675rem', color: '#818cf8', backgroundColor: 'rgba(99, 102, 241, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>
-                    {data.entries[dateStr].properties!['prop-weight']}kg
-                  </span>
-                )}
+                {(() => {
+                  const investProp = data.dailyProperties?.find((p) => p.id === 'prop-investments');
+                  const effInvestments = getEffectivePropertyValue(
+                    data.entries,
+                    dateStr,
+                    'prop-investments',
+                    investProp?.subproperties
+                  );
+                  const effWeight = getEffectivePropertyValue(data.entries, dateStr, 'prop-weight');
+                  return (
+                    <>
+                      {effInvestments !== undefined && (
+                        <span style={{ fontSize: '0.675rem', color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.12)', padding: '1px 4px', borderRadius: '3px', fontWeight: 600 }}>
+                          ${Number(effInvestments).toLocaleString('en-US', { minimumFractionDigits: Number(effInvestments) % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                      {effWeight !== undefined && (
+                        <span style={{ fontSize: '0.675rem', color: '#818cf8', backgroundColor: 'rgba(99, 102, 241, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>
+                          {effWeight}kg
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
                 <div style={{ fontSize: '0.725rem', fontWeight: 600, color: done > 0 ? '#10b981' : 'var(--text-muted)' }}>
                   {done}/{tasksOnDay.length}
                 </div>
@@ -374,12 +392,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         .filter((p) => p.subproperties && p.subproperties.length > 0)
                         .map((prop) => {
                           const subvals = dayEntry?.subpropertyValues?.[prop.id] || {};
-                          // Calculate sum from subproperties or fallback to parent property
-                          const computedSum = Object.values(subvals).reduce(
-                            (acc, v) => acc + (typeof v === 'number' && !isNaN(v) ? v : 0),
-                            0
-                          );
-                          const totalVal = computedSum > 0 ? computedSum : (typeof dayEntry?.properties?.[prop.id] === 'number' ? (dayEntry.properties[prop.id] as number) : 0);
+                          let computedSum = 0;
+                          (prop.subproperties || []).forEach((sub) => {
+                            const raw = subvals[sub.id];
+                            const num = typeof raw === 'number' ? raw : parseFloat(raw as any);
+                            if (!isNaN(num)) computedSum += num;
+                          });
+                          const totalVal = Math.round(computedSum * 100) / 100;
 
                           return (
                             <div
@@ -400,7 +419,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                     {prop.name} Total:
                                   </span>
                                   <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#34d399' }}>
-                                    {prop.unit === '$' ? `$${totalVal.toLocaleString()}` : `${totalVal.toLocaleString()} ${prop.unit || ''}`}
+                                    {prop.unit === '$'
+                                      ? `$${totalVal.toLocaleString('en-US', { minimumFractionDigits: totalVal % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`
+                                      : `${totalVal.toLocaleString('en-US', { minimumFractionDigits: totalVal % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })} ${prop.unit || ''}`}
                                   </span>
                                 </div>
                                 <span
@@ -442,8 +463,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                         value={displayVal}
                                         onChange={(e) => {
                                           if (onUpdateSubproperty) {
-                                            const num = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                            onUpdateSubproperty(selectedDate, prop.id, sub.id, num);
+                                            const valStr = e.target.value;
+                                            const num = valStr === '' ? 0 : parseFloat(valStr);
+                                            onUpdateSubproperty(selectedDate, prop.id, sub.id, isNaN(num) ? 0 : num);
                                           }
                                         }}
                                         disabled={!onUpdateSubproperty}
