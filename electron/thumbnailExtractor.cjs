@@ -1,7 +1,81 @@
 const fs = require('fs');
 const path = require('path');
 const { exec, execSync } = require('child_process');
-const yauzl = require('yauzl');
+const zlib = require('zlib');
+
+let yauzl = null;
+try {
+  yauzl = require('yauzl');
+} catch (e) {
+  // yauzl not installed or missing in bundle; native zlib zip parser will be used
+}
+
+/**
+ * Pure Node.js zero-dependency zip entry extractor.
+ * Reads local headers and central directory to extract uncompressed or deflated files.
+ * @param {string} filePath 
+ * @param {string[]} targetSuffixes 
+ * @returns {Buffer|null}
+ */
+function extractZipEntryNative(filePath, targetSuffixes) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const buf = fs.readFileSync(filePath);
+
+    // 1. Walk local file headers
+    let pos = 0;
+    while (pos + 30 <= buf.length) {
+      const sig = buf.readUInt32LE(pos);
+      if (sig !== 0x04034b50) break;
+      const flags = buf.readUInt16LE(pos + 6);
+      const compression = buf.readUInt16LE(pos + 8);
+      const compressedSize = buf.readUInt32LE(pos + 18);
+      const fileNameLen = buf.readUInt16LE(pos + 26);
+      const extraLen = buf.readUInt16LE(pos + 28);
+      const fileName = buf.toString('utf8', pos + 30, pos + 30 + fileNameLen).toLowerCase();
+      const dataStart = pos + 30 + fileNameLen + extraLen;
+
+      const matches = targetSuffixes.some((s) => fileName.endsWith(s.toLowerCase()));
+      if ((flags & 0x08) === 0 && compressedSize > 0) {
+        if (matches && dataStart + compressedSize <= buf.length) {
+          const raw = buf.subarray(dataStart, dataStart + compressedSize);
+          return compression === 0 ? raw : zlib.inflateRawSync(raw);
+        }
+        pos = dataStart + compressedSize;
+      } else {
+        break;
+      }
+    }
+
+    // 2. Central Directory fallback
+    let cdPos = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    while (cdPos !== -1) {
+      if (cdPos + 46 <= buf.length) {
+        const compression = buf.readUInt16LE(cdPos + 10);
+        const compressedSize = buf.readUInt32LE(cdPos + 20);
+        const fileNameLen = buf.readUInt16LE(cdPos + 28);
+        const localOffset = buf.readUInt32LE(cdPos + 42);
+        const fileName = buf.toString('utf8', cdPos + 46, cdPos + 46 + fileNameLen).toLowerCase();
+
+        if (targetSuffixes.some((s) => fileName.endsWith(s.toLowerCase()))) {
+          if (localOffset + 30 <= buf.length && buf.readUInt32LE(localOffset) === 0x04034b50) {
+            const locNameLen = buf.readUInt16LE(localOffset + 26);
+            const locExtraLen = buf.readUInt16LE(localOffset + 28);
+            const dataStart = localOffset + 30 + locNameLen + locExtraLen;
+            if (dataStart + compressedSize <= buf.length) {
+              const raw = buf.subarray(dataStart, dataStart + compressedSize);
+              return compression === 0 ? raw : zlib.inflateRawSync(raw);
+            }
+          }
+        }
+      }
+      cdPos = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), cdPos - 1);
+    }
+  } catch (err) {
+    // Ignore error
+  }
+  return null;
+}
 
 /**
  * Extracts embedded preview or merged image from a Krita (.kra) file.
@@ -13,6 +87,15 @@ function extractKritaThumbnail(filePath) {
   return new Promise((resolve) => {
     try {
       if (!fs.existsSync(filePath)) return resolve(null);
+
+      // 1. Fast, reliable native Node.js extraction
+      const nativeBuf = extractZipEntryNative(filePath, ['preview.png', 'mergedimage.png']);
+      if (nativeBuf && nativeBuf.length > 20) {
+        return resolve(`data:image/png;base64,${nativeBuf.toString('base64')}`);
+      }
+
+      // 2. yauzl fallback if available
+      if (!yauzl) return resolve(null);
 
       yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
         if (err || !zipfile) return resolve(null);
