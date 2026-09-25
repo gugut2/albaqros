@@ -34,7 +34,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     // 5: Strikethrough ~~strike~~
     // 6: Markdown link [text](url)
     // 7: Tag #tag
-    const pattern = /(\[\[.*?\]\]|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~|\[.*?\]\(.*?\)|\B#[a-zA-Z0-9_\-\/]+)/g;
+    // 8: Piped link [link|custom name]
+    const pattern = /(\[\[.*?\]\]|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~|\[.*?\]\(.*?\)|\B#[a-zA-Z0-9_\-\/]+|(?<!\[)\[[^[\]|\n]+\|[^[\]\n]+\](?!\]))/g;
 
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
@@ -168,6 +169,56 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               <ExternalLink size={10} style={{ display: 'inline' }} />
             </a>
           );
+        } else {
+          parts.push(matchStr);
+        }
+      } else if (matchStr.startsWith('[') && matchStr.includes('|') && !matchStr.startsWith('[[')) {
+        // Piped link [link|custom name] or [custom name|link]
+        const pipeMatch = matchStr.match(/^\[([^[\]|\n]+)\|([^[\]\n]+)\]$/);
+        if (pipeMatch) {
+          const p1 = pipeMatch[1].trim();
+          const p2 = pipeMatch[2].trim();
+          const isP1Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(p1);
+          const isP2Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(p2);
+          if (isP1Url || isP2Url) {
+            const rawUrl = isP1Url ? p1 : p2;
+            const label = isP1Url ? p2 : p1;
+            const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
+              ? rawUrl
+              : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
+            parts.push(
+              <a
+                key={`link-${match.index}`}
+                href={fullUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  if (fullUrl.startsWith('http:') || fullUrl.startsWith('https:') || fullUrl.startsWith('mailto:')) {
+                    e.preventDefault();
+                    if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+                      (window as any).electronAPI.openExternalUrl(fullUrl);
+                    } else {
+                      window.open(fullUrl, '_blank', 'noopener,noreferrer');
+                    }
+                  }
+                }}
+                style={{
+                  color: '#38bdf8',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '2px',
+                  cursor: 'pointer',
+                }}
+              >
+                {label || fullUrl}
+                <ExternalLink size={10} style={{ display: 'inline' }} />
+              </a>
+            );
+          } else {
+            parts.push(matchStr);
+          }
         } else {
           parts.push(matchStr);
         }

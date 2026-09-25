@@ -134,6 +134,34 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
   const saveTimeoutRef = useRef<number | null>(null);
   const lastRangeRef = useRef<Range | null>(null);
 
+  // Save current selection / caret position inside the live editor
+  const saveCurrentSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current) {
+      const range = sel.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        lastRangeRef.current = range.cloneRange();
+      }
+    }
+  }, []);
+
+  // Continuously track caret and selection inside the editor across all user clicks/keys
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editorRef.current) {
+        const range = sel.getRangeAt(0);
+        if (editorRef.current.contains(range.commonAncestorContainer)) {
+          lastRangeRef.current = range.cloneRange();
+        }
+      }
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
+
   // Load notes on mount
   const loadNotesList = useCallback(async (selectPath?: string) => {
     const res = await NotesService.listNotes();
@@ -352,8 +380,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
   // Insert wikilink at caret and preserve position without broken inline styles
   const insertWikilink = (targetTitle: string) => {
     const sel = window.getSelection();
-    let range: Range | null = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : lastRangeRef.current;
-    if (!range && lastRangeRef.current) {
+    let range: Range | null = null;
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      range = sel.getRangeAt(0);
+    } else if (lastRangeRef.current && editorRef.current?.contains(lastRangeRef.current.commonAncestorContainer)) {
       range = lastRangeRef.current;
     }
 
@@ -426,6 +456,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
   // Open the Web Link modal (Ctrl+K or toolbar button)
   const openWebLinkModal = (existingEl?: HTMLAnchorElement) => {
+    saveCurrentSelection();
+
     if (existingEl) {
       setEditingLinkNode(existingEl);
       setLinkDisplayText(existingEl.textContent || '');
@@ -438,14 +470,21 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
     const sel = window.getSelection();
     let selectedText = '';
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      lastRangeRef.current = range.cloneRange();
-      selectedText = range.toString().trim();
+    let currentRange: Range | null = null;
+
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      currentRange = sel.getRangeAt(0);
+      lastRangeRef.current = currentRange.cloneRange();
+    } else if (lastRangeRef.current && editorRef.current?.contains(lastRangeRef.current.commonAncestorContainer)) {
+      currentRange = lastRangeRef.current;
+    }
+
+    if (currentRange) {
+      selectedText = currentRange.toString().trim();
 
       // Check if selected range is inside an existing link
-      const anchor = (range.startContainer.parentElement?.closest('a.albaqros-external-link') ||
-        (sel.anchorNode as HTMLElement)?.closest?.('a.albaqros-external-link')) as HTMLAnchorElement | null;
+      const anchor = (currentRange.startContainer.parentElement?.closest('a.albaqros-external-link') ||
+        (currentRange.startContainer as HTMLElement)?.closest?.('a.albaqros-external-link')) as HTMLAnchorElement | null;
       if (anchor) {
         setEditingLinkNode(anchor);
         setLinkDisplayText(anchor.textContent || '');
@@ -506,8 +545,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     }
 
     const sel = window.getSelection();
-    let range: Range | null = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : lastRangeRef.current;
-    if (!range && lastRangeRef.current) {
+    let range: Range | null = null;
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      range = sel.getRangeAt(0);
+    } else if (lastRangeRef.current && editorRef.current?.contains(lastRangeRef.current.commonAncestorContainer)) {
       range = lastRangeRef.current;
     }
 
@@ -685,8 +726,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       return;
     }
 
-    // Markdown link completion on typing ')' or Space: [text](url)
-    if (e.key === ')' || e.key === ' ' || e.code === 'Space') {
+    // Markdown link completion on typing ')' or ']' or Space: [text](url) or [url|custom name] or [custom name|url]
+    if (e.key === ')' || e.key === ']' || e.key === ' ' || e.code === 'Space') {
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0) {
         const range = sel.getRangeAt(0);
@@ -694,50 +735,73 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
         if (node.nodeType === Node.TEXT_NODE) {
           const text = node.textContent || '';
           const offset = range.startOffset;
-          const typedChar = e.key === ')' ? ')' : '';
+          const typedChar = (e.key === ')' || e.key === ']') ? e.key : '';
           const candidate = (text.slice(0, offset) + typedChar).trim();
-          const match = candidate.match(/(?<!!)\[(.*?)\]\(([^\s)]+)\)$/);
-          if (match) {
-            e.preventDefault();
-            const matchLen = match[0].length;
-            const beforeText = candidate.slice(0, candidate.length - matchLen);
-            const afterText = text.slice(offset);
 
-            const rawUrl = match[2].trim();
-            const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
-              ? rawUrl
-              : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
-            const label = match[1].trim() || fullUrl;
+          const matchMd = candidate.match(/(?<!!)\[(.*?)\]\(([^\s)]+)\)$/);
+          const matchPipe = !matchMd ? candidate.match(/(?<!\[)\[([^[\]|\n]+)\|([^[\]\n]+)\]$/) : null;
 
-            node.textContent = beforeText;
+          if (matchMd || matchPipe) {
+            let label = '';
+            let rawUrl = '';
+            let matchLen = 0;
 
-            const linkEl = document.createElement('a');
-            linkEl.className = 'albaqros-external-link';
-            linkEl.href = fullUrl;
-            linkEl.target = '_blank';
-            linkEl.rel = 'noopener noreferrer';
-            linkEl.title = fullUrl;
-            linkEl.textContent = label;
-
-            const spaceNode = document.createTextNode('\u00A0');
-            const parent = node.parentNode;
-            if (parent) {
-              parent.insertBefore(linkEl, node.nextSibling);
-              parent.insertBefore(spaceNode, linkEl.nextSibling);
-              if (afterText) {
-                const afterNode = document.createTextNode(afterText);
-                parent.insertBefore(afterNode, spaceNode.nextSibling);
+            if (matchMd) {
+              matchLen = matchMd[0].length;
+              label = matchMd[1].trim();
+              rawUrl = matchMd[2].trim();
+            } else if (matchPipe) {
+              const part1 = matchPipe[1].trim();
+              const part2 = matchPipe[2].trim();
+              const isP1Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(part1);
+              const isP2Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(part2);
+              if (isP1Url || isP2Url) {
+                matchLen = matchPipe[0].length;
+                rawUrl = isP1Url ? part1 : part2;
+                label = isP1Url ? part2 : part1;
               }
-
-              const newRange = document.createRange();
-              newRange.setStartAfter(spaceNode);
-              newRange.collapse(true);
-              sel.removeAllRanges();
-              sel.addRange(newRange);
-              lastRangeRef.current = newRange.cloneRange();
             }
-            handleContentMutated();
-            return;
+
+            if (rawUrl) {
+              e.preventDefault();
+              const beforeText = candidate.slice(0, candidate.length - matchLen);
+              const afterText = text.slice(offset);
+
+              const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
+                ? rawUrl
+                : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : `https://${rawUrl}`);
+              const displayLabel = label || fullUrl;
+
+              node.textContent = beforeText;
+
+              const linkEl = document.createElement('a');
+              linkEl.className = 'albaqros-external-link';
+              linkEl.href = fullUrl;
+              linkEl.target = '_blank';
+              linkEl.rel = 'noopener noreferrer';
+              linkEl.title = fullUrl;
+              linkEl.textContent = displayLabel;
+
+              const spaceNode = document.createTextNode('\u00A0');
+              const parent = node.parentNode;
+              if (parent) {
+                parent.insertBefore(linkEl, node.nextSibling);
+                parent.insertBefore(spaceNode, linkEl.nextSibling);
+                if (afterText) {
+                  const afterNode = document.createTextNode(afterText);
+                  parent.insertBefore(afterNode, spaceNode.nextSibling);
+                }
+
+                const newRange = document.createRange();
+                newRange.setStartAfter(spaceNode);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+                lastRangeRef.current = newRange.cloneRange();
+              }
+              handleContentMutated();
+              return;
+            }
           }
         }
       }
@@ -1145,23 +1209,68 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     }
   };
 
-  // Smart paste: if text is selected and clipboard contains a URL, convert selection into a link
+  // Smart paste:
+  // - If text is selected and clipboard is a URL, convert selection into a link
+  // - If clipboard is a raw URL and no selection, automatically turn it into a link at cursor
+  // - If clipboard is [url|custom name] or [custom name|url] or [custom name](url), convert into a link with the custom name
   const handleEditorPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    saveCurrentSelection();
     const pastedText = e.clipboardData.getData('text/plain')?.trim();
     if (!pastedText) return;
 
-    const isUrl = /^https?:\/\/[^\s]+$/i.test(pastedText);
-    const sel = window.getSelection();
-
-    if (isUrl && sel && sel.rangeCount > 0 && !sel.isCollapsed) {
-      const range = sel.getRangeAt(0);
-      const selectedText = range.toString().trim();
-
-      if (selectedText && !/^https?:\/\/[^\s]+$/i.test(selectedText)) {
+    // 1. Check if pasted text is a custom pipe link: [link|custom name] or [custom name|link]
+    const pipeMatch = pastedText.match(/^\[([^\]|\n]+)\|([^\]\n]+)\]$/);
+    if (pipeMatch) {
+      const part1 = pipeMatch[1].trim();
+      const part2 = pipeMatch[2].trim();
+      const isP1Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(part1);
+      const isP2Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(part2);
+      if (isP1Url || isP2Url) {
         e.preventDefault();
-        insertOrUpdateWebLink(selectedText, pastedText);
+        const rawUrl = isP1Url ? part1 : part2;
+        const customName = isP1Url ? part2 : part1;
+        insertOrUpdateWebLink(customName, rawUrl);
         return;
       }
+    }
+
+    // 2. Check if pasted text is standard markdown link: [custom name](url)
+    const mdMatch = pastedText.match(/^\[(.*?)\]\(([^\s)]+)\)$/);
+    if (mdMatch) {
+      e.preventDefault();
+      const customName = mdMatch[1].trim();
+      const rawUrl = mdMatch[2].trim();
+      insertOrUpdateWebLink(customName, rawUrl);
+      return;
+    }
+
+    // 3. Check if pasted text is a URL
+    const isUrl = /^(?:https?:\/\/|www\.)[^\s]+$/i.test(pastedText);
+    if (isUrl) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      let selectedText = '';
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        !sel.isCollapsed &&
+        editorRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)
+      ) {
+        selectedText = sel.getRangeAt(0).toString().trim();
+      } else if (
+        lastRangeRef.current &&
+        !lastRangeRef.current.collapsed &&
+        editorRef.current?.contains(lastRangeRef.current.commonAncestorContainer)
+      ) {
+        selectedText = lastRangeRef.current.toString().trim();
+      }
+
+      if (selectedText && !/^(?:https?:\/\/|www\.)[^\s]+$/i.test(selectedText)) {
+        insertOrUpdateWebLink(selectedText, pastedText);
+      } else {
+        insertOrUpdateWebLink('', pastedText);
+      }
+      return;
     }
   };
 
@@ -2435,6 +2544,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       document.execCommand('insertOrderedList');
                       handleContentMutated();
@@ -2449,6 +2562,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       document.execCommand('insertUnorderedList');
                       handleContentMutated();
@@ -2463,6 +2580,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       const taskItem = document.createElement('div');
                       taskItem.className = 'albaqros-task-item';
@@ -2501,6 +2622,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       document.execCommand('bold');
                       handleContentMutated();
@@ -2515,6 +2640,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       document.execCommand('italic');
                       handleContentMutated();
@@ -2531,6 +2660,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => openWebLinkModal()}
                     title="Insert Link with custom text (Ctrl+K)"
                     style={{
@@ -2574,6 +2707,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                   <button
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      saveCurrentSelection();
+                    }}
                     onClick={() => {
                       setLinkModalQuery('');
                       setIsLinkModalOpen(true);
@@ -2627,8 +2764,16 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 onInput={handleContentMutated}
                 onBlur={() => flushSave()}
                 onKeyDown={handleEditorKeyDown}
-                onKeyUp={handleEditorKeyUp}
-                onClick={handleEditorClick}
+                onKeyUp={(e) => {
+                  saveCurrentSelection();
+                  handleEditorKeyUp(e);
+                }}
+                onMouseUp={saveCurrentSelection}
+                onSelect={saveCurrentSelection}
+                onClick={(e) => {
+                  saveCurrentSelection();
+                  handleEditorClick(e);
+                }}
                 onPaste={handleEditorPaste}
                 onMouseOver={handleEditorMouseOver}
                 onMouseOut={handleEditorMouseOut}

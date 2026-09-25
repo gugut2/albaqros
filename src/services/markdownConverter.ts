@@ -395,6 +395,24 @@ function renderInlineToHtml(text: string): string {
     );
   });
 
+  // 3b. Custom pipe links [URL|Custom Name] or [Custom Name|URL]
+  s = s.replace(/(?<!\[)\[([^[\]|\n]+)\|([^[\]\n]+)\](?!\])/g, (fullMatch, part1, part2) => {
+    const p1 = part1.trim().replace(/&amp;/g, '&');
+    const p2 = part2.trim().replace(/&amp;/g, '&');
+    const isP1Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(p1);
+    const isP2Url = /^(?:https?:\/\/|www\.|mailto:)/i.test(p2);
+    if (!isP1Url && !isP2Url) return fullMatch;
+    const rawUrl = isP1Url ? p1 : p2;
+    const label = isP1Url ? p2 : p1;
+    const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
+      ? rawUrl
+      : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : `https://${rawUrl}`);
+    const display = label || fullUrl;
+    return addToken(
+      `<a class="albaqros-external-link" href="${fullUrl}" target="_blank" rel="noopener noreferrer" title="${fullUrl}">${display}</a>`
+    );
+  });
+
   // 4. Tags #tag (ignore pure numbers like #1)
   s = s.replace(/(^|\s)#([a-zA-Z0-9_\-\/]+)/g, (fullMatch, space, tag) => {
     if (/^\d+$/.test(tag)) return fullMatch;
