@@ -228,6 +228,16 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     currentColor: CanvasColor;
   } | null>(null);
 
+  // Canvas right-click context menu (Empty canvas area)
+  const [canvasContextMenu, setCanvasContextMenu] = useState<{
+    x: number;
+    y: number;
+    worldX: number;
+    worldY: number;
+  } | null>(null);
+
+  const pendingInsertPosRef = useRef<{ x: number; y: number } | null>(null);
+
   const canvasStageRef = useRef<HTMLDivElement>(null);
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const lastPasteTimeRef = useRef<number>(0);
@@ -279,6 +289,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setSelectedEdgeId(null);
     setEditingNodeId(null);
     setImageContextMenu(null);
+    setCanvasContextMenu(null);
 
     const doc = await CanvasService.readCanvas(relativePath);
     if (doc) {
@@ -353,6 +364,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
       if (e.key === 'Escape') {
         setImageContextMenu(null);
+        setCanvasContextMenu(null);
         setSelectedNodeIds([]);
         setSelectedEdgeId(null);
         setEditingNodeId(null);
@@ -455,6 +467,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   // Background mouse down (Pan or Box Select or Deselect)
   const handleStageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setImageContextMenu(null);
+    setCanvasContextMenu(null);
     // Middle click (button 1) or Space + Left click or Hand Tool -> Pan
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand' || (e.button === 0 && e.target === canvasStageRef.current)) {
       setIsPanning(true);
@@ -665,18 +678,20 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   };
 
   // Add Card Actions
-  const handleAddTextCard = () => {
-    // Place near center of viewport
-    const centerWorld = screenToWorld(
-      canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
-      canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
-    );
+  const handleAddTextCard = (pos?: { x: number; y: number }) => {
+    let worldPos = pos;
+    if (!worldPos) {
+      worldPos = screenToWorld(
+        canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
+        canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
+      );
+    }
 
     const newNode: CanvasNode = {
       id: `text-${Date.now()}`,
       type: 'text',
-      x: Math.round(centerWorld.x - 150),
-      y: Math.round(centerWorld.y - 100),
+      x: Math.round(worldPos.x - 150),
+      y: Math.round(worldPos.y - 100),
       width: 300,
       height: 200,
       color: 'default',
@@ -891,26 +906,29 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     };
   }, [handleProcessImageBlob, insertImageNode]);
 
-  const handleAddImageCard = async () => {
+  const handleAddImageCard = async (pos?: { x: number; y: number }) => {
     const picked = await CanvasService.pickImageFile();
     if (!picked) return;
-    insertImageNode(picked.dataUrl, picked.fileName, picked.aspectRatio);
+    insertImageNode(picked.dataUrl, picked.fileName, picked.aspectRatio, pos);
   };
 
-  const handleAddGroupNode = () => {
-    const centerWorld = screenToWorld(
-      canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
-      canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
-    );
+  const handleAddGroupNode = (pos?: { x: number; y: number }) => {
+    let worldPos = pos;
+    if (!worldPos) {
+      worldPos = screenToWorld(
+        canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
+        canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
+      );
+    }
 
     const newNode: CanvasNode = {
       id: `group-${Date.now()}`,
       type: 'group',
-      x: Math.round(centerWorld.x - 250),
-      y: Math.round(centerWorld.y - 180),
+      x: Math.round(worldPos.x - 250),
+      y: Math.round(worldPos.y - 180),
       width: 500,
       height: 360,
-      label: 'Group Label',
+      label: 'New Group',
       color: 'default',
       zIndex: -1,
     };
@@ -935,7 +953,12 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   };
 
   // Open note embed dialog
-  const handleOpenEmbedNote = async () => {
+  const handleOpenEmbedNote = async (pos?: { x: number; y: number }) => {
+    if (pos) {
+      pendingInsertPosRef.current = pos;
+    } else {
+      pendingInsertPosRef.current = null;
+    }
     const res = await NotesService.listNotes();
     if (res.success) {
       setAllNotesList(res.notes);
@@ -949,16 +972,17 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setIsEmbedNoteModalOpen(false);
     const fullNote = await NotesService.readNote(noteMeta.relativePath);
 
-    const centerWorld = screenToWorld(
+    const worldPos = pendingInsertPosRef.current || screenToWorld(
       canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
       canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
     );
+    pendingInsertPosRef.current = null;
 
     const newNode: CanvasNode = {
       id: `note-${Date.now()}`,
       type: 'note',
-      x: Math.round(centerWorld.x - 160),
-      y: Math.round(centerWorld.y - 120),
+      x: Math.round(worldPos.x - 160),
+      y: Math.round(worldPos.y - 120),
       width: 320,
       height: 240,
       notePath: noteMeta.relativePath,
@@ -972,6 +996,53 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setCanvasData(updated);
     setSelectedNodeIds([newNode.id]);
     triggerSave(updated);
+  };
+
+  // Paste text or image at specific world position
+  const handlePasteAtPosition = async (pos: { x: number; y: number }) => {
+    // 1. Try reading clipboard image first
+    try {
+      const imgData = await CanvasService.readClipboardImage();
+      if (imgData && imgData.dataUrl) {
+        insertImageNode(
+          imgData.dataUrl,
+          imgData.fileName || 'Pasted Image',
+          imgData.aspectRatio,
+          pos,
+          imgData.width,
+          imgData.height
+        );
+        return;
+      }
+    } catch {}
+
+    // 2. Try reading clipboard text
+    try {
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          const lines = text.trim().split('\n');
+          const newNode: CanvasNode = {
+            id: `text-${Date.now()}`,
+            type: 'text',
+            x: Math.round(pos.x - 150),
+            y: Math.round(pos.y - 100),
+            width: 320,
+            height: Math.min(420, Math.max(180, lines.length * 24 + 60)),
+            color: 'default',
+            text: text.trim(),
+          };
+          const updated = { ...canvasData, nodes: [...canvasData.nodes, newNode] };
+          setCanvasData(updated);
+          setSelectedNodeIds([newNode.id]);
+          triggerSave(updated);
+          showToast('Pasted text note onto canvas', 'success');
+          return;
+        }
+      }
+    } catch {}
+
+    showToast('Clipboard is empty. Copy text, an image, or a screenshot (Win+Shift+S)', 'warn');
   };
 
   // Node Color change
@@ -1559,7 +1630,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <button
                 type="button"
-                onClick={handleAddTextCard}
+                onClick={() => handleAddTextCard()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
                 title="Add Text Card (Markdown)"
@@ -1570,7 +1641,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
               <button
                 type="button"
-                onClick={handleAddImageCard}
+                onClick={() => handleAddImageCard()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
                 title="Add Image Card from File"
@@ -1581,7 +1652,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
               <button
                 type="button"
-                onClick={handlePasteImageFromClipboard}
+                onClick={() => handlePasteImageFromClipboard()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
                 title="Paste Image from Clipboard (Ctrl+V)"
@@ -1592,7 +1663,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
               <button
                 type="button"
-                onClick={handleOpenEmbedNote}
+                onClick={() => handleOpenEmbedNote()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
                 title="Embed Existing Note from Notes Hub"
@@ -1603,7 +1674,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
               <button
                 type="button"
-                onClick={handleAddGroupNode}
+                onClick={() => handleAddGroupNode()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
                 title="Add Group Frame"
@@ -1679,12 +1750,31 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         {/* 3. The Infinite Stage (Pannable / Zoomable Workspace) */}
         <div
           ref={canvasStageRef}
-          onWheel={handleWheel}
+          onWheel={(e) => {
+            setCanvasContextMenu(null);
+            setImageContextMenu(null);
+            handleWheel(e);
+          }}
           onMouseDown={handleStageMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDropFiles}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setImageContextMenu(null);
+            const target = e.target as HTMLElement | null;
+            if (target && (target.closest('.canvas-node-card') || target.closest('header'))) {
+              return;
+            }
+            const worldPos = screenToWorld(e.clientX, e.clientY);
+            setCanvasContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              worldX: worldPos.x,
+              worldY: worldPos.y,
+            });
+          }}
           style={{
             flex: 1,
             position: 'relative',
@@ -1822,11 +1912,13 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               return (
                 <div
                   key={node.id}
+                  className="canvas-node-card"
                   onMouseDown={(e) => handleNodeMouseDown(e, node)}
                   onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCanvasContextMenu(null);
                     if (isImage) {
-                      e.preventDefault();
-                      e.stopPropagation();
                       setSelectedNodeIds([node.id]);
                       setSelectedEdgeId(null);
                       setImageContextMenu({
@@ -1835,6 +1927,11 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                         y: e.clientY,
                         currentColor: (node.color as CanvasColor) || 'default',
                       });
+                    } else {
+                      if (!selectedNodeIds.includes(node.id)) {
+                        setSelectedNodeIds([node.id]);
+                        setSelectedEdgeId(null);
+                      }
                     }
                   }}
                   style={{
@@ -2848,6 +2945,362 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               <Trash2 size={13} />
               <span>Delete Image</span>
             </button>
+          </div>
+        </>
+      )}
+
+      {/* Right-click Empty Canvas Context Menu */}
+      {canvasContextMenu && (
+        <>
+          {/* Backdrop to close context menu on click or right-click outside */}
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9998,
+              backgroundColor: 'transparent',
+            }}
+            onClick={() => setCanvasContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCanvasContextMenu(null);
+            }}
+          />
+
+          <div
+            style={{
+              position: 'fixed',
+              left: `${Math.min(window.innerWidth - 235, Math.max(12, canvasContextMenu.x))}px`,
+              top: `${Math.min(window.innerHeight - 340, Math.max(12, canvasContextMenu.y))}px`,
+              zIndex: 9999,
+              width: '225px',
+              backgroundColor: '#111520',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              borderRadius: '10px',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
+              backdropFilter: 'blur(16px)',
+              padding: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
+              userSelect: 'none',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {/* Context Menu Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                padding: '6px 8px 6px',
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                color: '#94a3b8',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.07)',
+                marginBottom: '4px',
+              }}
+            >
+              <LayoutGrid size={13} style={{ color: '#38bdf8' }} />
+              <span>Canvas Menu</span>
+            </div>
+
+            {/* Add Text Card */}
+            <button
+              type="button"
+              onClick={() => {
+                const pos = { x: canvasContextMenu.worldX, y: canvasContextMenu.worldY };
+                setCanvasContextMenu(null);
+                handleAddTextCard(pos);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileText size={14} style={{ color: '#38bdf8' }} />
+                <span>Add Text Card</span>
+              </div>
+            </button>
+
+            {/* Create Group */}
+            <button
+              type="button"
+              onClick={() => {
+                const pos = { x: canvasContextMenu.worldX, y: canvasContextMenu.worldY };
+                setCanvasContextMenu(null);
+                handleAddGroupNode(pos);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(168, 85, 247, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Layers size={14} style={{ color: '#c084fc' }} />
+                <span>Create Group Frame</span>
+              </div>
+            </button>
+
+            {/* Add Note from Vault */}
+            <button
+              type="button"
+              onClick={() => {
+                const pos = { x: canvasContextMenu.worldX, y: canvasContextMenu.worldY };
+                setCanvasContextMenu(null);
+                handleOpenEmbedNote(pos);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BookOpen size={14} style={{ color: '#818cf8' }} />
+                <span>Add Note from Vault</span>
+              </div>
+            </button>
+
+            {/* Add Image */}
+            <button
+              type="button"
+              onClick={() => {
+                const pos = { x: canvasContextMenu.worldX, y: canvasContextMenu.worldY };
+                setCanvasContextMenu(null);
+                handleAddImageCard(pos);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ImageIcon size={14} style={{ color: '#34d399' }} />
+                <span>Add Image (Browse...)</span>
+              </div>
+            </button>
+
+            {/* Paste from Clipboard */}
+            <button
+              type="button"
+              onClick={async () => {
+                const pos = { x: canvasContextMenu.worldX, y: canvasContextMenu.worldY };
+                setCanvasContextMenu(null);
+                await handlePasteAtPosition(pos);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '7px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(245, 158, 11, 0.12)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clipboard size={14} style={{ color: '#fbbf24' }} />
+                <span>Paste from Clipboard</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  color: '#64748b',
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                }}
+              >
+                Ctrl+V
+              </span>
+            </button>
+
+            <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.07)', margin: '4px 0' }} />
+
+            {/* Fit to View */}
+            <button
+              type="button"
+              onClick={() => {
+                setCanvasContextMenu(null);
+                if (canvasData.nodes.length === 0) {
+                  setZoom(1);
+                  setPan({ x: 300, y: 200 });
+                } else {
+                  handleFitToView();
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                e.currentTarget.style.color = '#f8fafc';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = '#94a3b8';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Maximize2 size={13} />
+                <span>Fit to View</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  color: '#64748b',
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                }}
+              >
+                Ctrl+0
+              </span>
+            </button>
+
+            {/* Clear Selection if something selected */}
+            {(selectedNodeIds.length > 0 || selectedEdgeId) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedNodeIds([]);
+                  setSelectedEdgeId(null);
+                  setCanvasContextMenu(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 9px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  transition: 'background 0.12s, color 0.12s',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  e.currentTarget.style.color = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#94a3b8';
+                }}
+              >
+                <X size={13} />
+                <span>Deselect All</span>
+              </button>
+            )}
           </div>
         </>
       )}
