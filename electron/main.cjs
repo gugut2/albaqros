@@ -1462,6 +1462,15 @@ ipcMain.handle('clipboard-read-image', async () => {
   }
 });
 
+ipcMain.handle('clipboard-read-text', async () => {
+  try {
+    return clipboard.readText();
+  } catch (err) {
+    console.error('Error reading clipboard text:', err);
+    return '';
+  }
+});
+
 // ==========================================
 // In-App Patcher & Auto-Updater Integration
 // ==========================================

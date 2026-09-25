@@ -258,9 +258,13 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const lastPasteTimeRef = useRef<number>(0);
   const isPastingRef = useRef<boolean>(false);
-  const handlePasteRef = useRef<(() => void) | null>(null);
+  const handlePasteRef = useRef<((options?: { targetWorldPos?: { x: number; y: number }; clipboardData?: DataTransfer | null }) => Promise<void>) | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'info' } | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    activeCanvasPathRef.current = activeCanvasPath;
+  }, [activeCanvasPath]);
 
   const showToast = useCallback((message: string, type: 'success' | 'warn' | 'info' = 'info') => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -530,13 +534,10 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         }
       }
 
-      // Ctrl+V -> Paste image from clipboard when not typing in text input
+      // Ctrl+V -> Paste from clipboard when not typing in text input
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !isTyping) {
         e.preventDefault();
-        if (Date.now() - lastPasteTimeRef.current > 600 && !isPastingRef.current) {
-          lastPasteTimeRef.current = Date.now();
-          handlePasteRef.current?.();
-        }
+        handlePasteRef.current?.();
       }
     };
 
@@ -549,9 +550,15 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       }
     };
 
+    const handleWinMouseMove = (e: MouseEvent) => {
+      lastMousePosRef.current = { clientX: e.clientX, clientY: e.clientY };
+    };
+
+    window.addEventListener('mousemove', handleWinMouseMove, { passive: true });
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
+      window.removeEventListener('mousemove', handleWinMouseMove);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
@@ -958,35 +965,180 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     [insertImageNode]
   );
 
-  // Paste image from clipboard
-  const handlePasteImageFromClipboard = useCallback(async () => {
-    if (!activeCanvasPathRef.current) return;
-    if (isPastingRef.current || Date.now() - lastPasteTimeRef.current < 600) return;
-    isPastingRef.current = true;
-    lastPasteTimeRef.current = Date.now();
+  // Core helper to insert a text node onto the canvas
+  const insertTextNode = useCallback(
+    (text: string, targetWorldPos?: { x: number; y: number }) => {
+      let worldPos = targetWorldPos;
+      if (!worldPos) {
+        const stageEl = canvasStageRef.current;
+        if (lastMousePosRef.current && stageEl) {
+          const rect = stageEl.getBoundingClientRect();
+          const isInside =
+            lastMousePosRef.current.clientX >= rect.left &&
+            lastMousePosRef.current.clientX <= rect.right &&
+            lastMousePosRef.current.clientY >= rect.top &&
+            lastMousePosRef.current.clientY <= rect.bottom;
 
-    try {
-      const imgData = await CanvasService.readClipboardImage();
-      if (imgData && imgData.dataUrl) {
-        insertImageNode(
-          imgData.dataUrl,
-          imgData.fileName || 'Pasted Image',
-          imgData.aspectRatio,
-          undefined,
-          imgData.width,
-          imgData.height
-        );
-      } else {
-        showToast('No image in clipboard. Copy an image or screenshot first (Win+Shift+S)', 'warn');
+          if (isInside) {
+            worldPos = screenToWorld(lastMousePosRef.current.clientX, lastMousePosRef.current.clientY);
+          } else {
+            worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          }
+        } else if (stageEl) {
+          const rect = stageEl.getBoundingClientRect();
+          worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        } else {
+          worldPos = { x: 0, y: 0 };
+        }
       }
-    } finally {
-      setTimeout(() => {
-        isPastingRef.current = false;
-      }, 600);
-    }
-  }, [insertImageNode, showToast]);
 
-  handlePasteRef.current = handlePasteImageFromClipboard;
+      pushHistorySnapshot();
+
+      const lines = text.trim().split('\n');
+      const newNode: CanvasNode = {
+        id: `text-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: 'text',
+        x: Math.round(worldPos.x - 160),
+        y: Math.round(worldPos.y - 100),
+        width: 320,
+        height: Math.min(450, Math.max(180, lines.length * 24 + 60)),
+        color: 'default',
+        text: text.trim(),
+      };
+
+      setCanvasData((prev) => {
+        const updated = { ...prev, nodes: [...prev.nodes, newNode] };
+        triggerSave(updated);
+        return updated;
+      });
+      setSelectedNodeIds([newNode.id]);
+      setSelectedEdgeId(null);
+      showToast('Pasted text note onto canvas', 'success');
+    },
+    [screenToWorld, triggerSave, showToast, pushHistorySnapshot]
+  );
+
+  // Unified paste handler for Ctrl+V, window paste, and context menu
+  const handleExecutePaste = useCallback(
+    async (options?: {
+      targetWorldPos?: { x: number; y: number };
+      clipboardData?: DataTransfer | null;
+    }) => {
+      if (!activeCanvasPathRef.current) return;
+      if (isPastingRef.current) return;
+
+      const now = Date.now();
+      if (now - lastPasteTimeRef.current < 350) return;
+      lastPasteTimeRef.current = now;
+      isPastingRef.current = true;
+
+      try {
+        let worldPos = options?.targetWorldPos;
+        if (!worldPos) {
+          const stageEl = canvasStageRef.current;
+          if (lastMousePosRef.current && stageEl) {
+            const rect = stageEl.getBoundingClientRect();
+            const isInside =
+              lastMousePosRef.current.clientX >= rect.left &&
+              lastMousePosRef.current.clientX <= rect.right &&
+              lastMousePosRef.current.clientY >= rect.top &&
+              lastMousePosRef.current.clientY <= rect.bottom;
+
+            if (isInside) {
+              worldPos = screenToWorld(lastMousePosRef.current.clientX, lastMousePosRef.current.clientY);
+            } else {
+              worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            }
+          } else if (stageEl) {
+            const rect = stageEl.getBoundingClientRect();
+            worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          } else {
+            worldPos = { x: 0, y: 0 };
+          }
+        }
+
+        // 1. Try reading image from ClipboardEvent DataTransfer items
+        if (options?.clipboardData?.items && options.clipboardData.items.length > 0) {
+          for (let i = 0; i < options.clipboardData.items.length; i++) {
+            const item = options.clipboardData.items[i];
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+              const blob = item.getAsFile();
+              if (blob) {
+                handleProcessImageBlob(blob, worldPos);
+                return;
+              }
+            }
+          }
+        }
+
+        // 2. Try reading image from ClipboardEvent DataTransfer files
+        if (options?.clipboardData?.files && options.clipboardData.files.length > 0) {
+          for (let i = 0; i < options.clipboardData.files.length; i++) {
+            const file = options.clipboardData.files[i];
+            if (file.type.startsWith('image/')) {
+              handleProcessImageBlob(file, worldPos, file.name);
+              return;
+            }
+          }
+        }
+
+        // 3. Try Electron native clipboard / web clipboard image
+        try {
+          const imgData = await CanvasService.readClipboardImage();
+          if (imgData && imgData.dataUrl) {
+            insertImageNode(
+              imgData.dataUrl,
+              imgData.fileName || 'Pasted Image',
+              imgData.aspectRatio,
+              worldPos,
+              imgData.width,
+              imgData.height
+            );
+            return;
+          }
+        } catch (err) {
+          console.warn('Clipboard image read error:', err);
+        }
+
+        // 4. Try reading text from ClipboardEvent DataTransfer
+        if (options?.clipboardData) {
+          const dtText = options.clipboardData.getData('text/plain');
+          if (dtText && dtText.trim()) {
+            if (dtText.trim().startsWith('data:image/')) {
+              insertImageNode(dtText.trim(), 'Pasted Image', undefined, worldPos);
+            } else {
+              insertTextNode(dtText.trim(), worldPos);
+            }
+            return;
+          }
+        }
+
+        // 5. Try reading text from Electron IPC / web navigator.clipboard
+        try {
+          const text = await CanvasService.readClipboardText();
+          if (text && text.trim()) {
+            if (text.trim().startsWith('data:image/')) {
+              insertImageNode(text.trim(), 'Pasted Image', undefined, worldPos);
+            } else {
+              insertTextNode(text.trim(), worldPos);
+            }
+            return;
+          }
+        } catch (err) {
+          console.warn('Clipboard text read error:', err);
+        }
+
+        showToast('Clipboard is empty. Copy text, an image, or a screenshot (Win+Shift+S)', 'warn');
+      } finally {
+        setTimeout(() => {
+          isPastingRef.current = false;
+        }, 350);
+      }
+    },
+    [screenToWorld, handleProcessImageBlob, insertImageNode, insertTextNode, showToast]
+  );
+
+  handlePasteRef.current = handleExecutePaste;
 
   // Window clipboard paste listener (handles Ctrl+V, image drag/paste from web, snipping tool, etc.)
   useEffect(() => {
@@ -1002,74 +1154,17 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         return;
       }
 
-      // Guard against rapid duplicate firing
-      if (isPastingRef.current || Date.now() - lastPasteTimeRef.current < 600) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      isPastingRef.current = true;
-      lastPasteTimeRef.current = Date.now();
+      e.preventDefault();
+      e.stopPropagation();
 
-      try {
-        const clipboardData = e.clipboardData;
-        if (!clipboardData) return;
-
-        // 1. Check clipboard items for image file/blob
-        if (clipboardData.items && clipboardData.items.length > 0) {
-          for (let i = 0; i < clipboardData.items.length; i++) {
-            const item = clipboardData.items[i];
-            if (item.kind === 'file' && item.type.startsWith('image/')) {
-              const blob = item.getAsFile();
-              if (blob) {
-                e.preventDefault();
-                e.stopPropagation();
-                handleProcessImageBlob(blob);
-                return;
-              }
-            }
-          }
-        }
-
-        // 2. Check clipboard files
-        if (clipboardData.files && clipboardData.files.length > 0) {
-          for (let i = 0; i < clipboardData.files.length; i++) {
-            const file = clipboardData.files[i];
-            if (file.type.startsWith('image/')) {
-              e.preventDefault();
-              e.stopPropagation();
-              handleProcessImageBlob(file, undefined, file.name);
-              return;
-            }
-          }
-        }
-
-        // 3. Fallback to Electron native clipboard if items were not exposed in DOM
-        const electronImg = await CanvasService.readClipboardImage();
-        if (electronImg && electronImg.dataUrl) {
-          e.preventDefault();
-          e.stopPropagation();
-          insertImageNode(
-            electronImg.dataUrl,
-            electronImg.fileName || 'Pasted Image',
-            electronImg.aspectRatio,
-            undefined,
-            electronImg.width,
-            electronImg.height
-          );
-        }
-      } finally {
-        setTimeout(() => {
-          isPastingRef.current = false;
-        }, 600);
-      }
+      handlePasteRef.current?.({ clipboardData: e.clipboardData });
     };
 
     window.addEventListener('paste', handlePasteEvent);
     return () => {
       window.removeEventListener('paste', handlePasteEvent);
     };
-  }, [handleProcessImageBlob, insertImageNode]);
+  }, []);
 
   const handleAddImageCard = async (pos?: { x: number; y: number }) => {
     const picked = await CanvasService.pickImageFile();
@@ -1168,50 +1263,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Paste text or image at specific world position
   const handlePasteAtPosition = async (pos: { x: number; y: number }) => {
-    // 1. Try reading clipboard image first
-    try {
-      const imgData = await CanvasService.readClipboardImage();
-      if (imgData && imgData.dataUrl) {
-        insertImageNode(
-          imgData.dataUrl,
-          imgData.fileName || 'Pasted Image',
-          imgData.aspectRatio,
-          pos,
-          imgData.width,
-          imgData.height
-        );
-        return;
-      }
-    } catch {}
-
-    // 2. Try reading clipboard text
-    try {
-      if (navigator.clipboard?.readText) {
-        const text = await navigator.clipboard.readText();
-        if (text && text.trim()) {
-          const lines = text.trim().split('\n');
-          pushHistorySnapshot();
-          const newNode: CanvasNode = {
-            id: `text-${Date.now()}`,
-            type: 'text',
-            x: Math.round(pos.x - 150),
-            y: Math.round(pos.y - 100),
-            width: 320,
-            height: Math.min(420, Math.max(180, lines.length * 24 + 60)),
-            color: 'default',
-            text: text.trim(),
-          };
-          const updated = { ...canvasData, nodes: [...canvasData.nodes, newNode] };
-          setCanvasData(updated);
-          setSelectedNodeIds([newNode.id]);
-          triggerSave(updated);
-          showToast('Pasted text note onto canvas', 'success');
-          return;
-        }
-      }
-    } catch {}
-
-    showToast('Clipboard is empty. Copy text, an image, or a screenshot (Win+Shift+S)', 'warn');
+    await handleExecutePaste({ targetWorldPos: pos });
   };
 
   // Node Color change
@@ -1824,13 +1876,13 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handlePasteImageFromClipboard()}
+                onClick={() => handleExecutePaste()}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
-                title="Paste Image from Clipboard (Ctrl+V)"
+                title="Paste from Clipboard (Ctrl+V)"
               >
                 <Clipboard size={14} color="#38bdf8" />
-                <span>+ Paste Image</span>
+                <span>+ Paste</span>
               </button>
 
               <button

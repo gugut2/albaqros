@@ -441,4 +441,27 @@ export const CanvasService = {
 
     return null;
   },
+
+  // Helper to read text directly from clipboard (via Electron API or web clipboard)
+  async readClipboardText(): Promise<string | null> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.readClipboardText) {
+      try {
+        const text = await (window as any).electronAPI.readClipboardText();
+        if (typeof text === 'string' && text.length > 0) return text;
+      } catch (e) {
+        console.warn('Electron clipboard text read failed:', e);
+      }
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (typeof text === 'string' && text.length > 0) return text;
+      } catch (e) {
+        // Permissions not granted or clipboard empty
+      }
+    }
+
+    return null;
+  },
 };
