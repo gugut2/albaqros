@@ -262,7 +262,7 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
               >
                 {/* Image Media */}
                 {artifact.type === 'image' && (
-                  artifact.dataUrl ? (
+                  (artifact.dataUrl || artifact.thumbnailUrl) ? (
                     <div
                       onClick={() => setLightboxArtifact(artifact)}
                       style={{
@@ -276,7 +276,7 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
                       }}
                     >
                       <img
-                        src={artifact.dataUrl}
+                        src={artifact.dataUrl || artifact.thumbnailUrl}
                         alt={artifact.title}
                         style={{
                           width: '100%',
@@ -285,6 +285,27 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
                           transition: 'transform 0.3s ease',
                         }}
                       />
+                      {artifact.fileExtension && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            backgroundColor: 'rgba(99, 102, 241, 0.85)',
+                            backdropFilter: 'blur(4px)',
+                            color: '#ffffff',
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <ImageIcon size={10} /> {artifact.fileExtension.replace('.', '').toUpperCase()}
+                        </div>
+                      )}
                       <div
                         style={{
                           position: 'absolute',
@@ -326,10 +347,13 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
 
                 {/* 3D Media */}
                 {artifact.type === '3d' && (
-                  artifact.thumbnailUrl ? (
-                    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                  (artifact.thumbnailUrl || artifact.dataUrl) ? (
+                    <div
+                      onClick={() => setLightboxArtifact(artifact)}
+                      style={{ width: '100%', height: '100%', position: 'relative', cursor: 'pointer' }}
+                    >
                       <img
-                        src={artifact.thumbnailUrl}
+                        src={artifact.thumbnailUrl || artifact.dataUrl}
                         alt={artifact.title}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
@@ -339,6 +363,7 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
                           top: '8px',
                           right: '8px',
                           backgroundColor: 'rgba(168, 85, 247, 0.85)',
+                          backdropFilter: 'blur(4px)',
                           color: '#ffffff',
                           fontSize: '0.65rem',
                           fontWeight: 700,
@@ -349,7 +374,37 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
                           gap: '4px',
                         }}
                       >
-                        <Box size={10} /> 3D RENDER
+                        <Box size={10} /> {artifact.fileExtension ? artifact.fileExtension.replace('.', '').toUpperCase() : '3D RENDER'}
+                      </div>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
+                      >
+                        <span
+                          style={{
+                            color: '#ffffff',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            padding: '6px 12px',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Maximize2 size={13} /> Full Screen Lightbox
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -420,33 +475,95 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
 
                 {/* Generic Project File */}
                 {artifact.type === 'file' && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '10px',
-                      color: '#818cf8',
-                    }}
-                  >
+                  (artifact.thumbnailUrl || artifact.dataUrl) ? (
+                    <div
+                      onClick={() => setLightboxArtifact(artifact)}
+                      style={{ width: '100%', height: '100%', position: 'relative', cursor: 'pointer' }}
+                    >
+                      <img
+                        src={artifact.thumbnailUrl || artifact.dataUrl}
+                        alt={artifact.title}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '8px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.85)',
+                          backdropFilter: 'blur(4px)',
+                          color: '#ffffff',
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <FileText size={10} /> {artifact.fileExtension ? artifact.fileExtension.replace('.', '').toUpperCase() : 'PROJECT'}
+                      </div>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
+                      >
+                        <span
+                          style={{
+                            color: '#ffffff',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            padding: '6px 12px',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Maximize2 size={13} /> Full Screen Lightbox
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
                     <div
                       style={{
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '12px',
-                        backgroundColor: 'rgba(99, 102, 241, 0.15)',
                         display: 'flex',
+                        flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        gap: '10px',
+                        color: '#818cf8',
                       }}
                     >
-                      <FileText size={28} />
+                      <div
+                        style={{
+                          width: '56px',
+                          height: '56px',
+                          borderRadius: '12px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <FileText size={28} />
+                      </div>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        {artifact.fileExtension ? artifact.fileExtension.toUpperCase() : 'PROJECT'} File
+                      </span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      {artifact.fileExtension ? artifact.fileExtension.toUpperCase() : 'PROJECT'} File
-                    </span>
-                  </div>
+                  )
                 )}
 
                 {/* Milestone Badge Pill on Top Left */}
@@ -733,7 +850,7 @@ export const EvolutionGallery: React.FC<EvolutionGalleryProps> = ({
               }}
             >
               <img
-                src={lightboxArtifact.dataUrl}
+                src={lightboxArtifact.dataUrl || lightboxArtifact.thumbnailUrl}
                 alt={lightboxArtifact.title}
                 style={{
                   maxHeight: '65vh',

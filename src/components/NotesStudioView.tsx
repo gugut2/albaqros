@@ -22,6 +22,8 @@ import {
   Tag,
   PanelLeftClose,
   PanelLeftOpen,
+  ExternalLink,
+  ChevronDown,
 } from 'lucide-react';
 import { NoteMetadata } from '../types';
 import { NotesService, extractTags, extractTitle, extractPlainTextPreview } from '../services/notesService';
@@ -31,6 +33,8 @@ import {
   extractAllNoteTags,
   removeTagFromContent,
   renameTagInContent,
+  isListItemEmpty,
+  cleanAllEmptyListItems,
 } from '../services/markdownConverter';
 
 interface NotesStudioViewProps {
@@ -93,13 +97,35 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
   // Dialogs
   const [isLinkModalOpen, setIsLinkModalOpen] = useState<boolean>(false);
   const [linkModalQuery, setLinkModalQuery] = useState<string>('');
+  const [isWebLinkModalOpen, setIsWebLinkModalOpen] = useState<boolean>(false);
+  const [linkDisplayText, setLinkDisplayText] = useState<string>('');
+  const [linkUrl, setLinkUrl] = useState<string>('');
+  const [editingLinkNode, setEditingLinkNode] = useState<HTMLAnchorElement | null>(null);
+
+  // Hover Link Tooltip/Popover state
+  const [hoverLinkInfo, setHoverLinkInfo] = useState<{
+    url: string;
+    text: string;
+    targetEl: HTMLAnchorElement | null;
+    top: number;
+    left: number;
+  } | null>(null);
+  const hoverLinkTimeoutRef = useRef<number | null>(null);
+
   const [isNewNoteOpen, setIsNewNoteOpen] = useState<boolean>(false);
   const [newNoteTitle, setNewNoteTitle] = useState<string>('');
   const [newNoteFolder, setNewNoteFolder] = useState<string>('');
+  const [newNoteCustomFolder, setNewNoteCustomFolder] = useState<string>('');
   const [isNewFolderOpen, setIsNewFolderOpen] = useState<boolean>(false);
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [renameTarget, setRenameTarget] = useState<NoteMetadata | null>(null);
   const [renameValue, setRenameValue] = useState<string>('');
+  const [renameFolder, setRenameFolder] = useState<string>('');
+  const [renameCustomFolder, setRenameCustomFolder] = useState<string>('');
+  const [discoveredFolders, setDiscoveredFolders] = useState<string[]>([]);
+  const [isNoteFolderDropdownOpen, setIsNoteFolderDropdownOpen] = useState<boolean>(false);
+  const [draggedNotePath, setDraggedNotePath] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -110,6 +136,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     const res = await NotesService.listNotes();
     if (res.success) {
       setNotes(res.notes);
+      if (res.folders) setDiscoveredFolders(res.folders);
       if (res.notesDir) setNotesDir(res.notesDir);
 
       const currentPath = activeNotePathRef.current;
@@ -151,6 +178,9 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
+
+    // Clean any empty bulletpoints that have no words after them before saving
+    cleanAllEmptyListItems(editorRef.current);
 
     const currentTags = activeTagsRef.current;
     const md = htmlToMarkdown(editorRef.current.innerHTML, currentTags);
@@ -394,6 +424,218 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     handleContentMutated();
   };
 
+  // Open the Web Link modal (Ctrl+K or toolbar button)
+  const openWebLinkModal = (existingEl?: HTMLAnchorElement) => {
+    if (existingEl) {
+      setEditingLinkNode(existingEl);
+      setLinkDisplayText(existingEl.textContent || '');
+      setLinkUrl(existingEl.getAttribute('href') || '');
+      setIsWebLinkModalOpen(true);
+      return;
+    }
+
+    setEditingLinkNode(null);
+
+    const sel = window.getSelection();
+    let selectedText = '';
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      lastRangeRef.current = range.cloneRange();
+      selectedText = range.toString().trim();
+
+      // Check if selected range is inside an existing link
+      const anchor = (range.startContainer.parentElement?.closest('a.albaqros-external-link') ||
+        (sel.anchorNode as HTMLElement)?.closest?.('a.albaqros-external-link')) as HTMLAnchorElement | null;
+      if (anchor) {
+        setEditingLinkNode(anchor);
+        setLinkDisplayText(anchor.textContent || '');
+        setLinkUrl(anchor.getAttribute('href') || '');
+        setIsWebLinkModalOpen(true);
+        return;
+      }
+    }
+
+    if (selectedText) {
+      if (/^https?:\/\/[^\s]+$/i.test(selectedText)) {
+        setLinkUrl(selectedText);
+        setLinkDisplayText('');
+      } else {
+        setLinkDisplayText(selectedText);
+        setLinkUrl('');
+      }
+    } else {
+      setLinkDisplayText('');
+      setLinkUrl('');
+    }
+
+    // Attempt to prefill URL from clipboard if user hasn't selected a URL
+    if (navigator.clipboard?.readText) {
+      navigator.clipboard
+        .readText()
+        .then((clip) => {
+          const trimmed = (clip || '').trim();
+          if (/^https?:\/\/[^\s]+$/i.test(trimmed)) {
+            setLinkUrl((prev) => (prev ? prev : trimmed));
+          }
+        })
+        .catch(() => {});
+    }
+
+    setIsWebLinkModalOpen(true);
+  };
+
+  // Insert new web link or update existing link
+  const insertOrUpdateWebLink = (displayText: string, url: string) => {
+    const cleanUrl = url.trim();
+    if (!cleanUrl) return;
+
+    const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(cleanUrl)
+      ? cleanUrl
+      : (cleanUrl.startsWith('www.') ? `https://${cleanUrl}` : `https://${cleanUrl}`);
+
+    const label = displayText.trim() || fullUrl;
+
+    if (editingLinkNode && editorRef.current?.contains(editingLinkNode)) {
+      editingLinkNode.href = fullUrl;
+      editingLinkNode.title = fullUrl;
+      editingLinkNode.textContent = label;
+      setEditingLinkNode(null);
+      setIsWebLinkModalOpen(false);
+      handleContentMutated();
+      return;
+    }
+
+    const sel = window.getSelection();
+    let range: Range | null = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : lastRangeRef.current;
+    if (!range && lastRangeRef.current) {
+      range = lastRangeRef.current;
+    }
+
+    const linkEl = document.createElement('a');
+    linkEl.className = 'albaqros-external-link';
+    linkEl.href = fullUrl;
+    linkEl.target = '_blank';
+    linkEl.rel = 'noopener noreferrer';
+    linkEl.title = fullUrl;
+    linkEl.textContent = label;
+
+    const space = document.createTextNode('\u00A0');
+
+    if (range && editorRef.current && editorRef.current.contains(range.commonAncestorContainer)) {
+      range.deleteContents();
+      range.insertNode(space);
+      range.insertNode(linkEl);
+
+      const newRange = document.createRange();
+      newRange.setStartAfter(space);
+      newRange.collapse(true);
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+      lastRangeRef.current = newRange.cloneRange();
+    } else if (editorRef.current) {
+      editorRef.current.appendChild(linkEl);
+      editorRef.current.appendChild(space);
+    }
+
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+
+    setIsWebLinkModalOpen(false);
+    handleContentMutated();
+  };
+
+  // Unlink an anchor node (replaces <a>text</a> with text)
+  const handleUnlinkNode = (anchor: HTMLAnchorElement) => {
+    if (!anchor || !editorRef.current?.contains(anchor)) return;
+    const textNode = document.createTextNode(anchor.textContent || '');
+    anchor.parentNode?.replaceChild(textNode, anchor);
+    setHoverLinkInfo(null);
+    handleContentMutated();
+  };
+
+  // When pressing Enter on an empty bullet point (or 2 enters between bullets):
+  // 1. Stop creating bullet points and automatically switch back to normal mode (paragraph)
+  // 2. Delete all bullet points that were created that have no words after them
+  const exitListToNormalParagraph = (currentLi: HTMLElement, sel: Selection) => {
+    const parentList = currentLi.closest('ul, ol') as HTMLElement | null;
+
+    const normalP = document.createElement('p');
+    normalP.style.margin = '6px 0';
+    normalP.style.fontSize = '0.94rem';
+    normalP.style.lineHeight = '1.65';
+    normalP.style.color = '#f8fafc';
+    const br = document.createElement('br');
+    normalP.appendChild(br);
+
+    if (parentList) {
+      // Collect any subsequent sibling lis if currentLi was in the middle of a list
+      const followingLis: Element[] = [];
+      let sibling = currentLi.nextElementSibling;
+      while (sibling) {
+        followingLis.push(sibling);
+        sibling = sibling.nextElementSibling;
+      }
+
+      currentLi.remove();
+
+      // Delete any other bullet points in this list that have no words after them
+      Array.from(parentList.querySelectorAll('li')).forEach((li) => {
+        if (isListItemEmpty(li as HTMLElement)) {
+          li.remove();
+        }
+      });
+
+      if (followingLis.length > 0) {
+        const isOl = parentList.tagName.toUpperCase() === 'OL';
+        const secondList = document.createElement(parentList.tagName.toLowerCase()) as HTMLElement;
+        secondList.style.margin = isOl ? '6px 0 6px 24px' : '6px 0 6px 20px';
+        secondList.style.padding = '0';
+        secondList.style.fontSize = '0.92rem';
+        secondList.style.color = '#f8fafc';
+        secondList.style.lineHeight = '1.6';
+        if (isOl) {
+          secondList.style.listStyleType = 'decimal';
+        }
+        followingLis.forEach((sib) => {
+          if (!isListItemEmpty(sib as HTMLElement)) {
+            secondList.appendChild(sib);
+          } else {
+            sib.remove();
+          }
+        });
+
+        if (secondList.children.length > 0) {
+          parentList.insertAdjacentElement('afterend', secondList);
+        }
+        parentList.insertAdjacentElement('afterend', normalP);
+      } else if (parentList.querySelectorAll('li').length > 0) {
+        parentList.insertAdjacentElement('afterend', normalP);
+      } else {
+        parentList.replaceWith(normalP);
+      }
+    } else {
+      currentLi.replaceWith(normalP);
+    }
+
+    // Clean any other empty bullet points in the editor with no words after them
+    if (editorRef.current) {
+      cleanAllEmptyListItems(editorRef.current);
+    }
+
+    // Set cursor cleanly inside the normal paragraph
+    const range = document.createRange();
+    range.setStart(normalP, 0);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    lastRangeRef.current = range.cloneRange();
+
+    handleContentMutated();
+  };
+
   // Keyboard events inside the Live ContentEditable Editor
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // 1. If inline [[ popup is open, handle navigation keys
@@ -434,6 +676,71 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       e.preventDefault();
       flushSave();
       return;
+    }
+
+    // Web Link shortcut: Ctrl+K or Cmd+K
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      openWebLinkModal();
+      return;
+    }
+
+    // Markdown link completion on typing ')' or Space: [text](url)
+    if (e.key === ')' || e.key === ' ' || e.code === 'Space') {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const node = range.startContainer;
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent || '';
+          const offset = range.startOffset;
+          const typedChar = e.key === ')' ? ')' : '';
+          const candidate = (text.slice(0, offset) + typedChar).trim();
+          const match = candidate.match(/(?<!!)\[(.*?)\]\(([^\s)]+)\)$/);
+          if (match) {
+            e.preventDefault();
+            const matchLen = match[0].length;
+            const beforeText = candidate.slice(0, candidate.length - matchLen);
+            const afterText = text.slice(offset);
+
+            const rawUrl = match[2].trim();
+            const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
+              ? rawUrl
+              : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
+            const label = match[1].trim() || fullUrl;
+
+            node.textContent = beforeText;
+
+            const linkEl = document.createElement('a');
+            linkEl.className = 'albaqros-external-link';
+            linkEl.href = fullUrl;
+            linkEl.target = '_blank';
+            linkEl.rel = 'noopener noreferrer';
+            linkEl.title = fullUrl;
+            linkEl.textContent = label;
+
+            const spaceNode = document.createTextNode('\u00A0');
+            const parent = node.parentNode;
+            if (parent) {
+              parent.insertBefore(linkEl, node.nextSibling);
+              parent.insertBefore(spaceNode, linkEl.nextSibling);
+              if (afterText) {
+                const afterNode = document.createTextNode(afterText);
+                parent.insertBefore(afterNode, spaceNode.nextSibling);
+              }
+
+              const newRange = document.createRange();
+              newRange.setStartAfter(spaceNode);
+              newRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+              lastRangeRef.current = newRange.cloneRange();
+            }
+            handleContentMutated();
+            return;
+          }
+        }
+      }
     }
 
     // 2. Space key: Transform Markdown shortcuts (#, ##, ###, -, *) live into styled blocks
@@ -478,9 +785,26 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
           // - or * -> Bullet List
           if (trimmed === '-' || trimmed === '*') {
+            const inUl = node.parentElement?.closest('ul');
+            if (inUl) {
+              return;
+            }
             e.preventDefault();
             node.textContent = text.slice(offset);
             document.execCommand('insertUnorderedList');
+            handleContentMutated();
+            return;
+          }
+
+          // 1. or 1) -> Numbered / Ordered List
+          if (/^\d+[.)]$/.test(trimmed)) {
+            const inOl = node.parentElement?.closest('ol');
+            if (inOl) {
+              return;
+            }
+            e.preventDefault();
+            node.textContent = text.slice(offset);
+            document.execCommand('insertOrderedList');
             handleContentMutated();
             return;
           }
@@ -488,10 +812,154 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       }
     }
 
-    // 3. Enter key in Headings: ensure next line returns to standard paragraph size
+    // 3. Enter key: If on an empty bullet point or numbered item (two enters), stop list, delete empty items, and return to normal mode
     if (e.key === 'Enter') {
       const sel = window.getSelection();
       if (sel && sel.anchorNode) {
+        const currentLi = (
+          sel.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? (sel.anchorNode as HTMLElement).closest('li')
+            : sel.anchorNode.parentElement?.closest('li')
+        ) as HTMLElement | null;
+
+        if (currentLi && isListItemEmpty(currentLi)) {
+          e.preventDefault();
+          exitListToNormalParagraph(currentLi, sel);
+          return;
+        }
+
+        // If not in a list item, check if current line/block starts with numbered list or bullet (e.g., "1. Potion")
+        if (!currentLi && !e.shiftKey) {
+          const currentBlock = (
+            sel.anchorNode.nodeType === Node.ELEMENT_NODE
+              ? (sel.anchorNode as HTMLElement).closest('p, div')
+              : sel.anchorNode.parentElement?.closest('p, div')
+          ) as HTMLElement | null;
+
+          if (currentBlock && editorRef.current?.contains(currentBlock)) {
+            const blockText = (currentBlock.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+            const numMatch = blockText.match(/^(\d+)[.)]\s*(.*)$/);
+            const bulletMatch = !numMatch && blockText.match(/^([-*•])\s*(.*)$/);
+
+            if (numMatch) {
+              const numVal = parseInt(numMatch[1], 10);
+              const textAfter = numMatch[2].trim();
+
+              // If line was just "1." or "2." with NO words after it, pressing Enter clears the number and makes it a normal empty paragraph
+              if (!textAfter) {
+                e.preventDefault();
+                currentBlock.innerHTML = '<br>';
+                const range = document.createRange();
+                range.setStart(currentBlock, 0);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                lastRangeRef.current = range.cloneRange();
+                handleContentMutated();
+                return;
+              }
+
+              // If line has "1. Potion", convert currentBlock into an <ol> with the next <li> ready for typing!
+              const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+              const isAtEnd =
+                !range || (sel.anchorNode.textContent && range.startOffset >= sel.anchorNode.textContent.trimEnd().length);
+
+              if (isAtEnd) {
+                e.preventDefault();
+                const ol = document.createElement('ol');
+                ol.style.margin = '6px 0 6px 24px';
+                ol.style.padding = '0';
+                ol.style.fontSize = '0.92rem';
+                ol.style.color = '#f8fafc';
+                ol.style.lineHeight = '1.6';
+                ol.style.listStyleType = 'decimal';
+                if (numVal > 1) {
+                  ol.setAttribute('start', String(numVal));
+                }
+
+                const firstLi = document.createElement('li');
+                firstLi.style.margin = '3px 0';
+                firstLi.innerHTML = currentBlock.innerHTML.replace(/^\s*\d+[.)]\s*/, '');
+                if (!firstLi.innerHTML.trim()) {
+                  firstLi.textContent = textAfter;
+                }
+
+                const secondLi = document.createElement('li');
+                secondLi.style.margin = '3px 0';
+                secondLi.appendChild(document.createElement('br'));
+
+                ol.appendChild(firstLi);
+                ol.appendChild(secondLi);
+
+                currentBlock.replaceWith(ol);
+
+                const newRange = document.createRange();
+                newRange.setStart(secondLi, 0);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+                lastRangeRef.current = newRange.cloneRange();
+                handleContentMutated();
+                return;
+              }
+            } else if (bulletMatch) {
+              const textAfter = bulletMatch[2].trim();
+              if (!textAfter) {
+                e.preventDefault();
+                currentBlock.innerHTML = '<br>';
+                const range = document.createRange();
+                range.setStart(currentBlock, 0);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                lastRangeRef.current = range.cloneRange();
+                handleContentMutated();
+                return;
+              }
+
+              const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+              const isAtEnd =
+                !range || (sel.anchorNode.textContent && range.startOffset >= sel.anchorNode.textContent.trimEnd().length);
+
+              if (isAtEnd) {
+                e.preventDefault();
+                const ul = document.createElement('ul');
+                ul.style.margin = '6px 0 6px 20px';
+                ul.style.padding = '0';
+                ul.style.fontSize = '0.92rem';
+                ul.style.color = '#f8fafc';
+                ul.style.lineHeight = '1.6';
+
+                const firstLi = document.createElement('li');
+                firstLi.style.margin = '3px 0';
+                firstLi.innerHTML = currentBlock.innerHTML.replace(/^\s*[-*•]\s*/, '');
+                if (!firstLi.innerHTML.trim()) {
+                  firstLi.textContent = textAfter;
+                }
+
+                const secondLi = document.createElement('li');
+                secondLi.style.margin = '3px 0';
+                secondLi.appendChild(document.createElement('br'));
+
+                ul.appendChild(firstLi);
+                ul.appendChild(secondLi);
+
+                currentBlock.replaceWith(ul);
+
+                const newRange = document.createRange();
+                newRange.setStart(secondLi, 0);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+                lastRangeRef.current = newRange.cloneRange();
+                handleContentMutated();
+                return;
+              }
+            }
+          }
+        }
+
+        // Headings: ensure next line returns to standard paragraph size
         const parent = sel.anchorNode.parentElement;
         const heading = parent?.closest('h1, h2, h3, h4, h5, h6');
         if (heading) {
@@ -499,6 +967,49 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
             document.execCommand('formatBlock', false, '<p>');
             handleContentMutated();
           }, 0);
+        }
+      }
+    }
+
+    // 4. Backspace key: If on an empty bullet point or numbered item, cancel it, delete it, and return to normal mode
+    if (e.key === 'Backspace') {
+      const sel = window.getSelection();
+      if (sel && sel.anchorNode) {
+        const currentLi = (
+          sel.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? (sel.anchorNode as HTMLElement).closest('li')
+            : sel.anchorNode.parentElement?.closest('li')
+        ) as HTMLElement | null;
+
+        if (currentLi && isListItemEmpty(currentLi)) {
+          e.preventDefault();
+          exitListToNormalParagraph(currentLi, sel);
+          return;
+        }
+
+        if (!currentLi) {
+          const currentBlock = (
+            sel.anchorNode.nodeType === Node.ELEMENT_NODE
+              ? (sel.anchorNode as HTMLElement).closest('p, div')
+              : sel.anchorNode.parentElement?.closest('p, div')
+          ) as HTMLElement | null;
+
+          if (currentBlock && editorRef.current?.contains(currentBlock)) {
+            const blockText = (currentBlock.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+            // If block contains only a lone marker like "1.", "1)", "-", "*", "•"
+            if (/^(\d+[.)]|[-*•])$/.test(blockText)) {
+              e.preventDefault();
+              currentBlock.innerHTML = '<br>';
+              const range = document.createRange();
+              range.setStart(currentBlock, 0);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+              lastRangeRef.current = range.cloneRange();
+              handleContentMutated();
+              return;
+            }
+          }
         }
       }
     }
@@ -543,8 +1054,74 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     }
   };
 
-  // Clicking on blue note links inside the live editor
+  // Smart paste: if text is selected and clipboard contains a URL, convert selection into a link
+  const handleEditorPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const pastedText = e.clipboardData.getData('text/plain')?.trim();
+    if (!pastedText) return;
+
+    const isUrl = /^https?:\/\/[^\s]+$/i.test(pastedText);
+    const sel = window.getSelection();
+
+    if (isUrl && sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const range = sel.getRangeAt(0);
+      const selectedText = range.toString().trim();
+
+      if (selectedText && !/^https?:\/\/[^\s]+$/i.test(selectedText)) {
+        e.preventDefault();
+        insertOrUpdateWebLink(selectedText, pastedText);
+        return;
+      }
+    }
+  };
+
+  // Hover popover over links
+  const handleEditorMouseOver = (e: React.MouseEvent) => {
+    const anchor = (e.target as HTMLElement).closest('a.albaqros-external-link') as HTMLAnchorElement | null;
+    if (anchor && editorRef.current) {
+      if (hoverLinkTimeoutRef.current) {
+        clearTimeout(hoverLinkTimeoutRef.current);
+        hoverLinkTimeoutRef.current = null;
+      }
+      const rect = anchor.getBoundingClientRect();
+      const editorRect = editorRef.current.getBoundingClientRect();
+      setHoverLinkInfo({
+        url: anchor.getAttribute('href') || '',
+        text: anchor.textContent || '',
+        targetEl: anchor,
+        top: rect.bottom - editorRect.top + editorRef.current.scrollTop + 6,
+        left: Math.max(10, rect.left - editorRect.left),
+      });
+    }
+  };
+
+  const handleEditorMouseOut = (e: React.MouseEvent) => {
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related?.closest?.('.albaqros-link-hover-card')) return;
+    if (hoverLinkTimeoutRef.current) clearTimeout(hoverLinkTimeoutRef.current);
+    hoverLinkTimeoutRef.current = window.setTimeout(() => {
+      setHoverLinkInfo(null);
+    }, 400);
+  };
+
+  // Clicking on links inside the live editor
   const handleEditorClick = (e: React.MouseEvent) => {
+    // 1. External Web Link clicked -> open in OS default browser
+    const externalLink = (e.target as HTMLElement).closest('.albaqros-external-link, a[href]');
+    if (externalLink) {
+      const href = externalLink.getAttribute('href');
+      if (href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+          (window as any).electronAPI.openExternalUrl(href);
+        } else {
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }
+        return;
+      }
+    }
+
+    // 2. Blue internal note link clicked
     const target = (e.target as HTMLElement).closest('.albaqros-note-link');
     if (target) {
       const noteTarget = target.getAttribute('data-note-target');
@@ -567,14 +1144,17 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [notes]);
 
-  // Folders list
+  // Folders list (discovered on disk + referenced by notes)
   const allFolders = useMemo(() => {
     const flds = new Set<string>();
+    for (const f of discoveredFolders) {
+      if (f) flds.add(f);
+    }
     for (const note of notes) {
       if (note.folder) flds.add(note.folder);
     }
     return Array.from(flds).sort();
-  }, [notes]);
+  }, [discoveredFolders, notes]);
 
   // Filtered notes list
   const filteredNotes = useMemo(() => {
@@ -611,15 +1191,38 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
   const charCount = activeContent.length;
 
+  // Move an existing note into any existing folder (or root)
+  const handleMoveNoteToFolder = async (noteRelativePath: string, targetFolder: string) => {
+    if (!noteRelativePath) return;
+    if (activeNotePathRef.current === noteRelativePath) {
+      await flushSave();
+    }
+    const cleanTargetFolder = targetFolder.trim();
+    const note = notes.find((n) => n.relativePath === noteRelativePath);
+    const title = note?.title || noteRelativePath.split('/').pop()?.replace(/\.md$/i, '') || 'Note';
+
+    const res = await NotesService.renameNote(noteRelativePath, title, cleanTargetFolder);
+    if (res) {
+      if (activeNotePathRef.current === noteRelativePath) {
+        activeNotePathRef.current = res.relativePath;
+        setActiveNotePath(res.relativePath);
+      }
+      await loadNotesList(res.relativePath);
+    }
+  };
+
   // New Note
   const handleCreateNewNote = async () => {
     const title = newNoteTitle.trim() || 'Untitled Note';
-    const folder = newNoteFolder.trim() || undefined;
+    const folder = (
+      newNoteFolder === '__NEW_FOLDER__' ? newNoteCustomFolder.trim() : newNoteFolder.trim()
+    ) || undefined;
     const res = await NotesService.createNote(title, folder);
     if (res) {
       setIsNewNoteOpen(false);
       setNewNoteTitle('');
       setNewNoteFolder('');
+      setNewNoteCustomFolder('');
       await loadNotesList(res.relativePath);
     }
   };
@@ -767,10 +1370,16 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     }
   };
 
-  // Rename note
+  // Rename & Move note
   const handleRenameNote = async () => {
     if (!renameTarget || !renameValue.trim()) return;
-    const res = await NotesService.renameNote(renameTarget.relativePath, renameValue.trim());
+    const finalFolder =
+      renameFolder === '__NEW_FOLDER__' ? renameCustomFolder.trim() : renameFolder.trim();
+    const res = await NotesService.renameNote(
+      renameTarget.relativePath,
+      renameValue.trim(),
+      finalFolder
+    );
     if (res) {
       if (activeNotePathRef.current === renameTarget.relativePath) {
         activeNotePathRef.current = res.relativePath;
@@ -778,6 +1387,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       }
       setRenameTarget(null);
       setRenameValue('');
+      setRenameFolder('');
+      setRenameCustomFolder('');
       await loadNotesList(res.relativePath);
     }
   };
@@ -915,41 +1526,87 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedFolder(null)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOverFolder('__ROOT__');
+                  }}
+                  onDragLeave={() => setDragOverFolder(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const notePath = draggedNotePath || e.dataTransfer.getData('text/plain');
+                    if (notePath) {
+                      handleMoveNoteToFolder(notePath, '');
+                    }
+                    setDragOverFolder(null);
+                    setDraggedNotePath(null);
+                  }}
                   style={{
                     fontSize: '0.72rem',
                     padding: '2px 8px',
                     borderRadius: '4px',
-                    border: 'none',
-                    backgroundColor: selectedFolder === null ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
-                    color: selectedFolder === null ? '#818cf8' : 'var(--text-secondary)',
+                    border: dragOverFolder === '__ROOT__' ? '1px dashed #818cf8' : '1px solid transparent',
+                    backgroundColor:
+                      dragOverFolder === '__ROOT__'
+                        ? 'rgba(99, 102, 241, 0.35)'
+                        : selectedFolder === null
+                        ? 'rgba(99, 102, 241, 0.25)'
+                        : 'rgba(255, 255, 255, 0.04)',
+                    color: selectedFolder === null || dragOverFolder === '__ROOT__' ? '#818cf8' : 'var(--text-secondary)',
                     cursor: 'pointer',
                     fontWeight: selectedFolder === null ? 600 : 400,
+                    transition: 'all 0.15s ease',
                   }}
+                  title="Drop note here to move to Root (or click to view All)"
                 >
-                  All
+                  All (Root)
                 </button>
-                {allFolders.map((folder) => (
-                  <button
-                    key={folder}
-                    type="button"
-                    onClick={() => setSelectedFolder(selectedFolder === folder ? null : folder)}
-                    style={{
-                      fontSize: '0.72rem',
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      border: 'none',
-                      backgroundColor: selectedFolder === folder ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
-                      color: selectedFolder === folder ? '#818cf8' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
-                  >
-                    <Folder size={11} />
-                    <span>{folder}</span>
-                  </button>
-                ))}
+                {allFolders.map((folder) => {
+                  const isDropHover = dragOverFolder === folder;
+                  return (
+                    <button
+                      key={folder}
+                      type="button"
+                      onClick={() => setSelectedFolder(selectedFolder === folder ? null : folder)}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverFolder(folder);
+                      }}
+                      onDragLeave={() => setDragOverFolder(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const notePath = draggedNotePath || e.dataTransfer.getData('text/plain');
+                        if (notePath) {
+                          handleMoveNoteToFolder(notePath, folder);
+                        }
+                        setDragOverFolder(null);
+                        setDraggedNotePath(null);
+                      }}
+                      style={{
+                        fontSize: '0.72rem',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: isDropHover ? '1px dashed #818cf8' : '1px solid transparent',
+                        backgroundColor:
+                          isDropHover
+                            ? 'rgba(99, 102, 241, 0.35)'
+                            : selectedFolder === folder
+                            ? 'rgba(99, 102, 241, 0.25)'
+                            : 'rgba(255, 255, 255, 0.04)',
+                        color: selectedFolder === folder || isDropHover ? '#818cf8' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transform: isDropHover ? 'scale(1.05)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                      title={`Drop note here to move into "${folder}"`}
+                    >
+                      <Folder size={11} />
+                      <span>{folder}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -998,17 +1655,29 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
           ) : (
             filteredNotes.map((note) => {
               const isActive = note.relativePath === activeNotePath;
+              const isDragging = draggedNotePath === note.relativePath;
               return (
                 <div
                   key={note.id}
                   onClick={() => selectNote(note.relativePath)}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', note.relativePath);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggedNotePath(note.relativePath);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedNotePath(null);
+                    setDragOverFolder(null);
+                  }}
                   style={{
                     padding: '10px 12px',
                     borderRadius: 'var(--radius-sm)',
                     marginBottom: '4px',
-                    cursor: 'pointer',
+                    cursor: 'grab',
                     backgroundColor: isActive ? 'rgba(99, 102, 241, 0.14)' : 'transparent',
                     border: isActive ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid transparent',
+                    opacity: isDragging ? 0.45 : 1,
                     transition: 'all 0.15s ease',
                   }}
                   onMouseEnter={(e) => {
@@ -1043,8 +1712,10 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                           e.stopPropagation();
                           setRenameTarget(note);
                           setRenameValue(note.title);
+                          setRenameFolder(note.folder || '');
+                          setRenameCustomFolder('');
                         }}
-                        title="Rename Note"
+                        title="Rename & Move Note"
                         style={{ padding: '2px', width: '20px', height: '20px' }}
                       >
                         <Edit2 size={11} />
@@ -1062,8 +1733,27 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                   </div>
 
                   {note.folder && (
-                    <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      📁 {note.folder}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedFolder(note.folder);
+                      }}
+                      title={`Filter by folder: ${note.folder}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontSize: '0.67rem',
+                        color: '#818cf8',
+                        backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                        padding: '1px 6px',
+                        borderRadius: '3px',
+                        marginTop: '3px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Folder size={10} />
+                      <span>{note.folder}</span>
                     </div>
                   )}
 
@@ -1183,6 +1873,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
               type="button"
               onClick={() => {
                 setNewNoteTitle('');
+                setNewNoteFolder(selectedFolder || '');
+                setNewNoteCustomFolder('');
                 setIsNewNoteOpen(true);
               }}
               title="Create New Note"
@@ -1225,19 +1917,166 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 position: 'relative',
               }}
             >
-              {/* ─── SIDE-BY-SIDE TAGS (Scrolls smoothly with the note!) ─── */}
+              {/* ─── SIDE-BY-SIDE TAGS & QUICK TOOLBAR ─── */}
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'row',
                   alignItems: 'center',
+                  justifyContent: 'space-between',
                   flexWrap: 'wrap',
-                  gap: '6px',
-                  marginBottom: '24px',
+                  gap: '8px',
+                  marginBottom: '20px',
                   userSelect: 'none',
                 }}
               >
-                <Tag size={13} style={{ color: '#38bdf8', opacity: 0.75, marginRight: '2px', flexShrink: 0 }} />
+                {/* Left: Folder Location & Tags */}
+                <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  {/* Folder Location & Quick Move Dropdown */}
+                  <div style={{ position: 'relative', display: 'inline-flex' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsNoteFolderDropdownOpen((prev) => !prev)}
+                      title="Click to move note into another folder"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: activeNote.folder ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        border: activeNote.folder ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid var(--border-subtle)',
+                        color: activeNote.folder ? '#a5b4fc' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Folder size={12} color={activeNote.folder ? '#818cf8' : 'var(--text-muted)'} />
+                      <span>{activeNote.folder ? activeNote.folder : 'Root (No folder)'}</span>
+                      <ChevronDown size={11} style={{ opacity: 0.7 }} />
+                    </button>
+
+                    {isNoteFolderDropdownOpen && (
+                      <>
+                        <div
+                          style={{ position: 'fixed', inset: 0, zIndex: 120 }}
+                          onClick={() => setIsNoteFolderDropdownOpen(false)}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 'calc(100% + 4px)',
+                            left: 0,
+                            minWidth: '210px',
+                            backgroundColor: '#161b26',
+                            border: '1px solid var(--border-medium)',
+                            borderRadius: 'var(--radius-sm)',
+                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+                            zIndex: 130,
+                            padding: '4px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '2px',
+                          }}
+                        >
+                          <div style={{ padding: '4px 8px', fontSize: '0.66rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                            Move Note To:
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsNoteFolderDropdownOpen(false);
+                              if (activeNote.folder) {
+                                handleMoveNoteToFolder(activeNote.relativePath, '');
+                              }
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '5px 8px',
+                              borderRadius: '4px',
+                              border: 'none',
+                              backgroundColor: !activeNote.folder ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                              color: !activeNote.folder ? '#818cf8' : 'var(--text-primary)',
+                              fontSize: '0.75rem',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Folder size={12} />
+                              <span>Root (No folder)</span>
+                            </div>
+                            {!activeNote.folder && <Check size={12} />}
+                          </button>
+
+                          {allFolders.map((fld) => (
+                            <button
+                              key={fld}
+                              type="button"
+                              onClick={() => {
+                                setIsNoteFolderDropdownOpen(false);
+                                if (activeNote.folder !== fld) {
+                                  handleMoveNoteToFolder(activeNote.relativePath, fld);
+                                }
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '5px 8px',
+                                borderRadius: '4px',
+                                border: 'none',
+                                backgroundColor: activeNote.folder === fld ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                                color: activeNote.folder === fld ? '#818cf8' : 'var(--text-primary)',
+                                fontSize: '0.75rem',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                <Folder size={12} />
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fld}</span>
+                              </div>
+                              {activeNote.folder === fld && <Check size={12} />}
+                            </button>
+                          ))}
+
+                          <div style={{ height: '1px', backgroundColor: 'var(--border-subtle)', margin: '4px 0' }} />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsNoteFolderDropdownOpen(false);
+                              setIsNewFolderOpen(true);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '5px 8px',
+                              borderRadius: '4px',
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              color: '#38bdf8',
+                              fontSize: '0.75rem',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <FolderPlus size={12} />
+                            <span>+ Create New Folder...</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+                  <Tag size={13} style={{ color: '#38bdf8', opacity: 0.75, marginRight: '2px', flexShrink: 0 }} />
 
                 {activeTags.map((tag, idx) => {
                   const isEditing = editingTagIndex === idx;
@@ -1484,7 +2323,101 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                     <span>Tag</span>
                   </button>
                 )}
+                </div>
+
+                {/* Right: Quick Action Buttons */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => openWebLinkModal()}
+                    title="Insert Link with custom text (Ctrl+K)"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                      color: '#38bdf8',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.1)';
+                      e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.25)';
+                    }}
+                  >
+                    <Link2 size={12} />
+                    <span>Add Link</span>
+                    <span
+                      style={{
+                        fontSize: '0.62rem',
+                        opacity: 0.75,
+                        marginLeft: '2px',
+                        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                        padding: '1px 4px',
+                        borderRadius: '3px',
+                      }}
+                    >
+                      Ctrl+K
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLinkModalQuery('');
+                      setIsLinkModalOpen(true);
+                    }}
+                    title="Link another note in vault ([[)"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      color: '#818cf8',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+                      e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.1)';
+                      e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.25)';
+                    }}
+                  >
+                    <BookOpen size={12} />
+                    <span>Link Note</span>
+                    <span
+                      style={{
+                        fontSize: '0.62rem',
+                        opacity: 0.75,
+                        marginLeft: '2px',
+                        backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                        padding: '1px 4px',
+                        borderRadius: '3px',
+                      }}
+                    >
+                      [[
+                    </span>
+                  </button>
+                </div>
               </div>
+
               <div
                 ref={editorRef}
                 contentEditable
@@ -1494,9 +2427,119 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 onKeyDown={handleEditorKeyDown}
                 onKeyUp={handleEditorKeyUp}
                 onClick={handleEditorClick}
+                onPaste={handleEditorPaste}
+                onMouseOver={handleEditorMouseOver}
+                onMouseOut={handleEditorMouseOut}
                 className="albaqros-live-editor"
-                data-placeholder="Start typing... Use # for H1, ## for H2, ### for H3, - for bullets, and [[ to link notes"
+                data-placeholder="Start typing... Use # for H1, ## for H2, ### for H3, - for bullets, [[ to link notes, or Ctrl+K for links"
               />
+
+              {/* Floating Link Hover Card */}
+              {hoverLinkInfo && (
+                <div
+                  className="albaqros-link-hover-card"
+                  onMouseEnter={() => {
+                    if (hoverLinkTimeoutRef.current) {
+                      clearTimeout(hoverLinkTimeoutRef.current);
+                      hoverLinkTimeoutRef.current = null;
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    hoverLinkTimeoutRef.current = window.setTimeout(() => {
+                      setHoverLinkInfo(null);
+                    }, 300);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: `${hoverLinkInfo.top}px`,
+                    left: `${hoverLinkInfo.left}px`,
+                    zIndex: 100,
+                    backgroundColor: '#161b26',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    borderRadius: 'var(--radius-sm)',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+                    padding: '6px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    maxWidth: '380px',
+                  }}
+                >
+                  <a
+                    href={hoverLinkInfo.url}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+                        (window as any).electronAPI.openExternalUrl(hoverLinkInfo.url);
+                      } else {
+                        window.open(hoverLinkInfo.url, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    title="Open link in default browser"
+                    style={{
+                      fontSize: '0.75rem',
+                      color: '#38bdf8',
+                      textDecoration: 'underline',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '220px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <ExternalLink size={11} style={{ flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{hoverLinkInfo.url}</span>
+                  </a>
+
+                  <div style={{ height: '14px', width: '1px', backgroundColor: 'var(--border-subtle)' }} />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (hoverLinkInfo.targetEl) {
+                        openWebLinkModal(hoverLinkInfo.targetEl);
+                        setHoverLinkInfo(null);
+                      }
+                    }}
+                    title="Edit display text or URL"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '2px',
+                    }}
+                  >
+                    <Edit2 size={12} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (hoverLinkInfo.targetEl) {
+                        handleUnlinkNode(hoverLinkInfo.targetEl);
+                      }
+                    }}
+                    title="Remove link (keep text)"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--accent-rose)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '2px',
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )}
 
               {/* Floating Inline [[ Autocomplete Popup */}
               {wikiPopup.open && wikiSuggestions.length > 0 && (
@@ -1621,7 +2664,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 <span>{charCount} characters</span>
               </div>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-                Type <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>#</kbd>, <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>##</kbd>, <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>-</kbd>, or <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>[[</kbd>
+                Type <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>#</kbd>, <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>##</kbd>, <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>-</kbd>, <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>[[</kbd>, or <kbd style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: '3px' }}>Ctrl+K</kbd> for Links
               </div>
             </div>
           </>
@@ -1666,6 +2709,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
               className="btn-primary"
               onClick={() => {
                 setNewNoteTitle('');
+                setNewNoteFolder(selectedFolder || '');
+                setNewNoteCustomFolder('');
                 setIsNewNoteOpen(true);
               }}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
@@ -1766,6 +2811,145 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
         </div>
       )}
 
+      {/* ─── MODAL: INSERT / EDIT WEB LINK (CTRL+K) ─── */}
+      {isWebLinkModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => {
+            setIsWebLinkModalOpen(false);
+            setEditingLinkNode(null);
+          }}
+        >
+          <div
+            style={{
+              width: '460px',
+              maxWidth: '92vw',
+              backgroundColor: '#13171f',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--border-medium)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
+              padding: '24px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                <ExternalLink size={18} color="#38bdf8" />
+                <span>{editingLinkNode ? 'Edit Web Link' : 'Insert Web Link'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsWebLinkModalOpen(false);
+                  setEditingLinkNode(null);
+                }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                insertOrUpdateWebLink(linkDisplayText, linkUrl);
+              }}
+            >
+              {/* Display Text Input */}
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  Text to display in note
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Get Good At Blender: A Step-by-Step Guide..."
+                  value={linkDisplayText}
+                  onChange={(e) => setLinkDisplayText(e.target.value)}
+                  autoFocus={!linkDisplayText}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '9px 12px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                  What you read in the note instead of the raw URL
+                </span>
+              </div>
+
+              {/* URL Input */}
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  Destination URL
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://grantabbitt.substack.com/p/get-good-at-blender..."
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  autoFocus={Boolean(linkDisplayText)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '9px 12px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                  The webpage opened when you click the link
+                </span>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setIsWebLinkModalOpen(false);
+                    setEditingLinkNode(null);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!linkUrl.trim()}
+                  className="btn-primary"
+                  style={{
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    borderColor: '#38bdf8',
+                    opacity: !linkUrl.trim() ? 0.5 : 1,
+                    cursor: !linkUrl.trim() ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <Check size={14} />
+                  <span>{editingLinkNode ? 'Save Changes' : 'Insert Link'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ─── MODAL: CREATE NEW NOTE ─── */}
       {isNewNoteOpen && (
         <div
@@ -1834,16 +3018,11 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  Folder (Optional)
+                  Folder
                 </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Career, Architecture, Languages"
+                <select
                   value={newNoteFolder}
                   onChange={(e) => setNewNoteFolder(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleCreateNewNote();
-                  }}
                   style={{
                     width: '100%',
                     backgroundColor: 'var(--bg-input)',
@@ -1853,8 +3032,41 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                     color: 'var(--text-primary)',
                     fontSize: '0.85rem',
                     outline: 'none',
+                    cursor: 'pointer',
                   }}
-                />
+                >
+                  <option value="">📁 Root (No folder)</option>
+                  {allFolders.map((fld) => (
+                    <option key={fld} value={fld}>
+                      📁 {fld}
+                    </option>
+                  ))}
+                  <option value="__NEW_FOLDER__">➕ Create New Folder...</option>
+                </select>
+
+                {newNoteFolder === '__NEW_FOLDER__' && (
+                  <input
+                    type="text"
+                    placeholder="Enter new folder name..."
+                    value={newNoteCustomFolder}
+                    onChange={(e) => setNewNoteCustomFolder(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateNewNote();
+                    }}
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      marginTop: '8px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid #818cf8',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '8px 12px',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                    }}
+                  />
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
@@ -1993,7 +3205,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                Rename Note
+                Rename & Move Note
               </h3>
               <button
                 type="button"
@@ -2007,7 +3219,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                  New Title
+                  Note Title
                 </label>
                 <input
                   type="text"
@@ -2030,6 +3242,59 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 />
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  Folder
+                </label>
+                <select
+                  value={renameFolder}
+                  onChange={(e) => setRenameFolder(e.target.value)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '8px 12px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="">📁 Root (No folder)</option>
+                  {allFolders.map((fld) => (
+                    <option key={fld} value={fld}>
+                      📁 {fld}
+                    </option>
+                  ))}
+                  <option value="__NEW_FOLDER__">➕ Create New Folder...</option>
+                </select>
+
+                {renameFolder === '__NEW_FOLDER__' && (
+                  <input
+                    type="text"
+                    placeholder="Enter new folder name..."
+                    value={renameCustomFolder}
+                    onChange={(e) => setRenameCustomFolder(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameNote();
+                    }}
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      marginTop: '8px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid #818cf8',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '8px 12px',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                    }}
+                  />
+                )}
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
                 <button
                   type="button"
@@ -2043,7 +3308,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                   className="btn-primary"
                   onClick={handleRenameNote}
                 >
-                  Rename
+                  Save Changes
                 </button>
               </div>
             </div>

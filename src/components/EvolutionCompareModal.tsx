@@ -52,7 +52,9 @@ export const EvolutionCompareModal: React.FC<EvolutionCompareModalProps> = ({
   };
 
   const renderMedia = (piece: ProjectArtifact) => {
-    if (piece.type === 'image' && piece.dataUrl) {
+    const imgUrl = piece.dataUrl || piece.thumbnailUrl;
+
+    if (piece.type === 'image' && imgUrl) {
       return (
         <div
           style={{
@@ -68,7 +70,7 @@ export const EvolutionCompareModal: React.FC<EvolutionCompareModalProps> = ({
           }}
         >
           <img
-            src={piece.dataUrl}
+            src={imgUrl}
             alt={piece.title}
             style={{
               maxHeight: '100%',
@@ -97,9 +99,9 @@ export const EvolutionCompareModal: React.FC<EvolutionCompareModalProps> = ({
             padding: '20px',
           }}
         >
-          {piece.thumbnailUrl ? (
+          {(piece.thumbnailUrl || piece.dataUrl) ? (
             <img
-              src={piece.thumbnailUrl}
+              src={piece.thumbnailUrl || piece.dataUrl}
               alt={piece.title}
               style={{ maxHeight: '180px', maxWidth: '100%', objectFit: 'contain', borderRadius: '4px' }}
             />
@@ -173,6 +175,47 @@ export const EvolutionCompareModal: React.FC<EvolutionCompareModalProps> = ({
           )}
           {piece.dataUrl && (
             <audio controls src={piece.dataUrl} style={{ width: '100%', maxWidth: '300px' }} />
+          )}
+        </div>
+      );
+    }
+
+    if (piece.thumbnailUrl || piece.dataUrl) {
+      return (
+        <div
+          style={{
+            borderRadius: 'var(--radius-md)',
+            overflow: 'hidden',
+            backgroundColor: '#080a0e',
+            border: '1px solid var(--border-subtle)',
+            height: '280px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            padding: '10px',
+          }}
+        >
+          <img
+            src={piece.thumbnailUrl || piece.dataUrl}
+            alt={piece.title}
+            style={{
+              maxHeight: '210px',
+              maxWidth: '100%',
+              objectFit: 'contain',
+              borderRadius: '4px',
+            }}
+          />
+          {piece.filePath && (
+            <button
+              type="button"
+              onClick={() => handleOpenExternal(piece.filePath)}
+              className="btn-secondary"
+              style={{ fontSize: '0.75rem', padding: '4px 10px', marginTop: '8px' }}
+            >
+              <ExternalLink size={12} /> Open in App
+            </button>
           )}
         </div>
       );

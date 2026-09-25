@@ -275,6 +275,12 @@ input:focus, textarea:focus, select:focus {
   list-style-type: disc;
 }
 
+.albaqros-live-editor ol {
+  margin: 6px 0 6px 24px;
+  padding: 0;
+  list-style-type: decimal;
+}
+
 .albaqros-live-editor li {
   margin: 4px 0;
   line-height: 1.6;
@@ -286,6 +292,22 @@ input:focus, textarea:focus, select:focus {
   text-underline-offset: 2px !important;
   font-weight: 600 !important;
   cursor: pointer !important;
+}
+
+.albaqros-live-editor .albaqros-external-link {
+  color: #38bdf8 !important;
+  text-decoration: underline !important;
+  text-underline-offset: 3px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+  word-break: break-word;
+}
+
+.albaqros-live-editor .albaqros-external-link:hover {
+  color: #7dd3fc !important;
+  text-decoration-color: #7dd3fc !important;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
 }
 
 .albaqros-live-editor blockquote {

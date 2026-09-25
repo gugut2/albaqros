@@ -16,6 +16,7 @@ import {
   BookOpen,
   PanelLeftClose,
   PanelLeftOpen,
+  LayoutGrid,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -24,6 +25,7 @@ import { AnalyticsView } from './AnalyticsView';
 import { HistoryView } from './HistoryView';
 import { MajorTasksView } from './MajorTasksView';
 import { NotesStudioView } from './NotesStudioView';
+import { CanvasStudioView } from './CanvasStudioView';
 import { DailyRemindersCard } from './DailyRemindersCard';
 import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
@@ -70,7 +72,7 @@ interface MaximizedViewProps {
   onOpenManageReminders?: () => void;
 }
 
-type StudioTab = 'today' | 'major' | 'notes' | 'analytics' | 'history' | 'recurring';
+type StudioTab = 'today' | 'major' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
 
 export const MaximizedView: React.FC<MaximizedViewProps> = ({
   currentDate,
@@ -290,6 +292,29 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
 
           <button
             type="button"
+            onClick={() => setActiveTab('canvas')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              backgroundColor: activeTab === 'canvas' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+              color: activeTab === 'canvas' ? '#ffffff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'canvas' ? 600 : 500,
+              fontSize: '0.85rem',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <LayoutGrid size={16} color={activeTab === 'canvas' ? '#818cf8' : 'currentColor'} />
+            Canvas Board
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('analytics')}
             style={{
               display: 'flex',
@@ -388,8 +413,8 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
       <main
         style={{
           flex: 1,
-          padding: activeTab === 'notes' ? 0 : '24px',
-          overflowY: activeTab === 'notes' ? 'hidden' : 'auto',
+          padding: activeTab === 'notes' || activeTab === 'canvas' ? 0 : '24px',
+          overflowY: activeTab === 'notes' || activeTab === 'canvas' ? 'hidden' : 'auto',
           backgroundColor: '#0b0d11',
           position: 'relative',
           display: 'flex',
@@ -763,6 +788,18 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             <NotesStudioView
               isStudioSidebarCollapsed={isStudioSidebarCollapsed}
               onToggleStudioSidebar={toggleStudioSidebar}
+            />
+          </div>
+        )}
+
+        {activeTab === 'canvas' && (
+          <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+            <CanvasStudioView
+              isStudioSidebarCollapsed={isStudioSidebarCollapsed}
+              onToggleStudioSidebar={toggleStudioSidebar}
+              onNavigateToNote={() => {
+                setActiveTab('notes');
+              }}
             />
           </div>
         )}

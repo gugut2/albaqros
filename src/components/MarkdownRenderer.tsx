@@ -134,12 +134,26 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
         // Link [text](url)
         const linkMatch = matchStr.match(/^\[(.*?)\]\((.*?)\)$/);
         if (linkMatch) {
+          const rawUrl = linkMatch[2].trim();
+          const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(rawUrl)
+            ? rawUrl
+            : (rawUrl.startsWith('www.') ? `https://${rawUrl}` : rawUrl);
           parts.push(
             <a
               key={`link-${match.index}`}
-              href={linkMatch[2]}
+              href={fullUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => {
+                if (fullUrl.startsWith('http:') || fullUrl.startsWith('https:') || fullUrl.startsWith('mailto:')) {
+                  e.preventDefault();
+                  if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+                    (window as any).electronAPI.openExternalUrl(fullUrl);
+                  } else {
+                    window.open(fullUrl, '_blank', 'noopener,noreferrer');
+                  }
+                }
+              }}
               style={{
                 color: '#38bdf8',
                 textDecoration: 'underline',
@@ -147,9 +161,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '2px',
+                cursor: 'pointer',
               }}
             >
-              {linkMatch[1]}
+              {linkMatch[1] || fullUrl}
               <ExternalLink size={10} style={{ display: 'inline' }} />
             </a>
           );

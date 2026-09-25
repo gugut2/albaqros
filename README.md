@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/gugut2/albaqros?color=6366f1&label=Download%20Installer)](https://github.com/gugut2/albaqros/releases/latest)
 [![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/gugut2/albaqros/releases/latest)
 
-📥 **[Download Latest Installer (Albaqros Setup v1.2.0)](https://github.com/gugut2/albaqros/releases/download/v1.2.0/Albaqros.Setup.1.2.0.exe)**
+📥 **[Download Latest Installer (Albaqros Setup v1.3.0)](https://github.com/gugut2/albaqros/releases/download/v1.3.0/Albaqros.Setup.1.3.0.exe)**
 
 Albaqros is a local-first desktop productivity application built with **Electron**, **React**, **Vite**, and **TypeScript**. It balances deep-focus daily execution with high-level milestone progress, historical reflection, and visual analytics in a tailored dark-mode interface.
 
@@ -22,6 +22,8 @@ Albaqros is a local-first desktop productivity application built with **Electron
   - Deep-focus productivity center with dedicated tabs:
     - **Today's Agenda**: Side-by-side view with checklist on the left and full-length journal on the right.
     - **Major Projects & Goals**: Macro-milestone tracker with live progress bars.
+    - **Notes & Knowledge Hub**: Live Markdown notes with bi-directional wikilinks and folder trees.
+    - **Canvas Board**: Infinite 2D visual workspace inspired by Obsidian Canvas.
     - **Analytics & Graphs**: Consistency matrices and velocity charts.
     - **Past Days Archive**: Historical calendar browser with retroactive editing and deletion.
     - **Recurring Chores**: Cadence rules manager.
@@ -37,6 +39,7 @@ Albaqros is a local-first desktop productivity application built with **Electron
   - Configure a milestone frequency: e.g. *“Create a milestone project every 7 days”*.
   - Live cadence tracker displays days since last submission, countdowns (`Next piece due in 3 days`), and overdue alerts.
 - **Multi-Media Deliverables & File Tracking**:
+  - **Automatic Thumbnail Extraction**: Select raw project files like Krita (`.kra`), Photoshop (`.psd`), or Blender (`.blend`) and Albaqros automatically extracts high-resolution embedded preview covers.
   - **Concept Art & Images**: Chronological thumbnail gallery, hover zoom, and full-screen high-res Lightbox.
   - **3D Projects** (`.blend`, `.obj`, `.fbx`, `.gltf`): Poly-cube badges, render covers, and 1-click **"Open in Blender / 3D App"** and **"Show in Explorer"** buttons.
   - **Music & Audio / SFX** (`.wav`, `.mp3`, `.ogg`, `.flac`): Built-in custom dark-mode audio player with play/pause, timestamps, scrubber, and DAW launcher.
@@ -93,7 +96,8 @@ Albaqros is a local-first desktop productivity application built with **Electron
 ---
 
 ### 6. ✍️ Reflective Journaling & Smart Lists
-- **Intelligent Auto-Bullets**: Pressing `Enter` on a bullet line automatically starts the next bullet point (`• `). Pressing `Enter` on an empty bullet cleanly exits the list.
+- **Intelligent Auto-Bullets & Numbered Lists**: Pressing `Enter` on a bullet line or numbered line automatically starts the next item (`• ` or `2. `). Breaking a line without typing anything cleanly exits list mode and removes empty markers.
+- **External Web Links**: Rich links (`[Text](URL)`) with custom display text, hover previews, and 1-click external browser opening.
 - **One-Click List Converter**: Convert raw notes into structured bullet points with the `Format as List` toolbar action.
 - **Daily Energy Rating**: Log your daily energy on a 1–5 scale to correlate mood and capacity with task completion over time.
 
@@ -111,7 +115,7 @@ Albaqros is a local-first desktop productivity application built with **Electron
 - **User-Defined Vault Folder**:
   - Name your vault whatever you wish (e.g. `MyVault`, `LifeOS`, `AlbaqrosVault`) and place it anywhere on your filesystem, including inside **Google Drive**, **OneDrive**, **Dropbox**, or local disk.
   - Select an existing vault folder or create a new vault directly from Albaqros with 1 click.
-  - When creating or choosing a vault, Albaqros automatically saves your data into `albaqros-data.json`, writes `vault.json` metadata, and creates an `artifacts/` folder for creative milestone files.
+  - When creating or choosing a vault, Albaqros automatically saves your data into `albaqros-data.json`, writes `vault.json` metadata, and creates `notes/`, `canvas/`, and `artifacts/` folders.
 - **Permanent Vault Persistence**:
   - Remembers your active vault permanently in desktop configuration (`albaqros-config.json`), instantly mounting your chosen vault whenever the app boots.
 - **Automatic Cloud Drive Sync & Hot-Reloading**:
@@ -123,12 +127,15 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 9. 📝 Knowledge & Notes Studio (v1.2.0)
+### 9. 📝 Knowledge & Notes Studio
 - **Obsidian & Standard Markdown Compatible**:
   - Genuine `.md` files saved directly to `notes/` inside your active vault on Google Drive or local storage.
+- **Folder Trees & Drag-and-Drop Organization**:
+  - Organize notes in folders and nested subfolders.
+  - Drag and drop notes directly onto folders to organize knowledge quickly.
 - **Live-Preview Writing Surface**:
   - Clean WYSIWYG editing without cumbersome split-screen lag.
-  - Markdown shortcuts live formatting: `#` for H1, `##` for H2, `###` for H3, `-` for bullet lists.
+  - Markdown shortcuts live formatting: `#` for H1, `##` for H2, `###` for H3, `-` for bullet lists, `1.` for ordered lists.
 - **Bi-Directional Wikilinks (`[[Note Name]]`)**:
   - Type `[[` anywhere to bring up an intelligent inline autocomplete suggestions popup.
   - Backlinks graph index automatically discovers all inbound connections to the current note.
@@ -136,7 +143,23 @@ Albaqros is a local-first desktop productivity application built with **Electron
   - Standard YAML frontmatter tag preservation.
   - Header Tag Bar: 1-click **Add (+ Tag)**, **Edit / Rename**, and **Remove (×)** tags.
   - Auto-discovers `#tags` typed in note body and aggregates them with frontmatter tags.
-  - Case-safe Windows filesystem resolution and safe deletion guarantees.
+
+---
+
+### 10. 🎨 Obsidian-Compatible Canvas Studio (v1.3.0)
+- **Infinite 2D Visual Canvas**:
+  - Smooth infinite pan and mouse-wheel zoom centered on cursor.
+  - Scale any card (text, images, embedded notes) with 8-point corner and edge handles.
+  - Keyboard shortcuts: `Space + Drag` or Middle Click to pan, `Ctrl + 0` to reset zoom, `Ctrl + 1` to fit all cards to view.
+- **Multi-Type Visual Nodes**:
+  - **Text & Sticky Cards**: Live Markdown cards with Obsidian colors (*Default Dark, Crimson, Amber, Gold, Emerald, Cyan, Amethyst*).
+  - **Image Cards**: Drag-and-drop images directly from your desktop or picker, scale dimensions, maintain aspect ratio, or open full-screen preview.
+  - **Embedded Vault Notes**: Embed live Markdown notes directly from your Notes hub with 1-click jump back to Notes.
+  - **Curved Connector Arrows**: Drag from card side anchor points to link thoughts and build project mindmaps.
+  - **Group Frames**: Organize clusters of related cards with labeled boundaries.
+- **Folder Organization & Genuine `.canvas` Files**:
+  - Automatically saved as `.canvas` files (Obsidian JSON standard) directly inside your active Vault's `canvas/` folder.
+  - Create folders, create canvases in folders, and drag-and-drop canvases between folders.
 
 ---
 

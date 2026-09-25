@@ -334,10 +334,8 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                           }}
                           title={`Piece #${art.milestoneNumber || 1}: ${art.title}`}
                         >
-                          {art.type === 'image' && art.dataUrl ? (
-                            <img src={art.dataUrl} alt={art.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : art.type === '3d' && art.thumbnailUrl ? (
-                            <img src={art.thumbnailUrl} alt={art.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          {art.thumbnailUrl || art.dataUrl ? (
+                            <img src={art.thumbnailUrl || art.dataUrl} alt={art.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                           ) : art.type === '3d' ? (
                             <Box size={14} color="#c084fc" />
                           ) : art.type === 'audio' ? (

@@ -83,12 +83,12 @@ function saveFallbackNotes(map: Record<string, Note>) {
 }
 
 export const NotesService = {
-  async listNotes(): Promise<{ success: boolean; notes: NoteMetadata[]; notesDir?: string }> {
+  async listNotes(): Promise<{ success: boolean; notes: NoteMetadata[]; folders?: string[]; notesDir?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.notes?.listNotes) {
       try {
         const res = await (window as any).electronAPI.notes.listNotes();
         if (res && res.success) {
-          return { success: true, notes: res.notes || [], notesDir: res.notesDir };
+          return { success: true, notes: res.notes || [], folders: res.folders || [], notesDir: res.notesDir };
         }
       } catch (err) {
         console.error('Error listing notes via Electron:', err);
@@ -98,7 +98,8 @@ export const NotesService = {
     // Fallback
     const map = getFallbackNotes();
     const notes: NoteMetadata[] = Object.values(map).map(({ content, ...meta }) => meta);
-    return { success: true, notes, notesDir: 'LocalStorage (Dev Mode)' };
+    const folders = Array.from(new Set(notes.map((n) => n.folder).filter(Boolean) as string[])).sort();
+    return { success: true, notes, folders, notesDir: 'LocalStorage (Dev Mode)' };
   },
 
   async readNote(relativePath: string): Promise<Note | null> {

@@ -20,7 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
   selectProjectFile: () => ipcRenderer.invoke('select-project-file'),
   selectCoverImage: () => ipcRenderer.invoke('select-cover-image'),
+  extractFileThumbnail: (filePath) => ipcRenderer.invoke('extract-file-thumbnail', filePath),
   openExternalFile: (filePath) => ipcRenderer.invoke('open-external-file', filePath),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
   onExternalDataChange: (callback) => {
     ipcRenderer.on('external-data-change', () => callback());
@@ -44,5 +46,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('notes-rename', { oldRelativePath, newTitle, newFolder }),
     createFolder: (folderPath) => ipcRenderer.invoke('notes-create-folder', folderPath),
     openNotesFolder: (relativePath) => ipcRenderer.invoke('notes-open-folder', relativePath),
+  },
+  canvas: {
+    listCanvases: () => ipcRenderer.invoke('canvas-list'),
+    readCanvas: (relativePath) => ipcRenderer.invoke('canvas-read', relativePath),
+    writeCanvas: (relativePath, data) => ipcRenderer.invoke('canvas-write', { relativePath, data }),
+    createCanvas: (title, folder, initialData) =>
+      ipcRenderer.invoke('canvas-create', { title, folder, initialData }),
+    deleteCanvas: (relativePath) => ipcRenderer.invoke('canvas-delete', relativePath),
+    renameCanvas: (oldRelativePath, newTitle, newFolder) =>
+      ipcRenderer.invoke('canvas-rename', { oldRelativePath, newTitle, newFolder }),
+    createFolder: (folderPath) => ipcRenderer.invoke('canvas-create-folder', folderPath),
+    openCanvasFolder: (relativePath) => ipcRenderer.invoke('canvas-open-folder', relativePath),
   },
 });

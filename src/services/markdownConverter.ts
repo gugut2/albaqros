@@ -141,10 +141,42 @@ export function cleanCorruptedLinks(md: string): string {
     .replace(/(?:^|\s*)#?[0-9a-f]{6};\s*text-decoration:[^>]*>/gi, '');
 }
 
+// Check if a list item (LI) has no words/content after it
+export function isListItemEmpty(li: HTMLElement | null): boolean {
+  if (!li) return false;
+  const raw = (li.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+  // If string contains only spaces, bullet characters (-, *, •), or numbers with dot/bracket (e.g. 1., 2.), with no words
+  const textWithoutMarkers = raw.replace(/^([-*•]|\d+[.)])*\s*$/, '').trim();
+  if (textWithoutMarkers.length > 0) return false;
+
+  // Preserve items containing media, links, or inputs
+  if (li.querySelector('img, a, input, [data-note-target], [data-tag]')) {
+    return false;
+  }
+  return true;
+}
+
+// Clean and remove any bulletpoints in a container that have no words after them
+export function cleanAllEmptyListItems(root: HTMLElement, excludeLi?: HTMLElement | null): void {
+  const lists = root.querySelectorAll('ul, ol');
+  lists.forEach((list) => {
+    const lis = Array.from(list.querySelectorAll('li'));
+    lis.forEach((li) => {
+      if (li !== excludeLi && isListItemEmpty(li as HTMLElement)) {
+        li.remove();
+      }
+    });
+    if (list.children.length === 0 || list.querySelectorAll('li').length === 0) {
+      list.remove();
+    }
+  });
+}
+
 export function markdownToHtml(md: string): string {
   if (!md) return '<p><br></p>';
 
-  const cleanedMd = cleanCorruptedLinks(md);
+  // Sanitize corrupted links and remove any bulletpoints or numbered markers that have no words after them
+  const cleanedMd = cleanCorruptedLinks(md).replace(/^[-*]\s*$/gm, '').replace(/^\d+[.)]\s*$/gm, '');
   // Strip frontmatter so only clean body content is loaded into the live editor
   const { body } = extractFrontmatter(cleanedMd);
   const lines = body.split('\n');
@@ -222,16 +254,47 @@ export function markdownToHtml(md: string): string {
     }
 
     // 4. Unordered bullet list (- or *)
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed === '-' || trimmed === '*') {
       const listItems: string[] = [];
-      while (i < lines.length && (lines[i].trim().startsWith('- ') || lines[i].trim().startsWith('* '))) {
-        const itemText = lines[i].trim().replace(/^[-*]\s+/, '');
-        listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+      while (
+        i < lines.length &&
+        (lines[i].trim().startsWith('- ') ||
+          lines[i].trim().startsWith('* ') ||
+          lines[i].trim() === '-' ||
+          lines[i].trim() === '*')
+      ) {
+        const itemText = lines[i].trim().replace(/^[-*]\s*/, '').trim();
+        // Delete all bulletpoints that have no words after them
+        if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+          listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+        }
         i++;
       }
-      htmlParts.push(
-        `<ul style="margin: 6px 0 6px 20px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6;">${listItems.join('')}</ul>`
-      );
+      if (listItems.length > 0) {
+        htmlParts.push(
+          `<ul style="margin: 6px 0 6px 20px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6;">${listItems.join('')}</ul>`
+        );
+      }
+      if (i < lines.length && lines[i].trim() === '') i++;
+      continue;
+    }
+
+    // 4b. Ordered numbered list (1. or 1))
+    if (/^\d+[.)]\s*/.test(trimmed)) {
+      const listItems: string[] = [];
+      while (i < lines.length && /^\d+[.)]\s*/.test(lines[i].trim())) {
+        const itemText = lines[i].trim().replace(/^\d+[.)]\s*/, '').trim();
+        // Delete all numbered items that have no words after them
+        if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+          listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+        }
+        i++;
+      }
+      if (listItems.length > 0) {
+        htmlParts.push(
+          `<ol style="margin: 6px 0 6px 24px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6; list-style-type: decimal;">${listItems.join('')}</ol>`
+        );
+      }
       if (i < lines.length && lines[i].trim() === '') i++;
       continue;
     }
@@ -299,19 +362,32 @@ function renderInlineToHtml(text: string): string {
     );
   });
 
-  // 3. Tags #tag (ignore pure numbers like #1)
+  // 3. External Markdown links [Text](URL)
+  s = s.replace(/(?<!!)\[(.*?)\]\(([^\s)]+)\)/g, (_, label, rawUrl) => {
+    const unescapedUrl = rawUrl.replace(/&amp;/g, '&').trim();
+    if (!unescapedUrl) return _;
+    const fullUrl = /^(?:https?:\/\/|mailto:)/i.test(unescapedUrl)
+      ? unescapedUrl
+      : (unescapedUrl.startsWith('www.') ? `https://${unescapedUrl}` : unescapedUrl);
+    const display = (label || unescapedUrl).trim();
+    return addToken(
+      `<a class="albaqros-external-link" href="${fullUrl}" target="_blank" rel="noopener noreferrer" title="${fullUrl}">${display}</a>`
+    );
+  });
+
+  // 4. Tags #tag (ignore pure numbers like #1)
   s = s.replace(/(^|\s)#([a-zA-Z0-9_\-\/]+)/g, (fullMatch, space, tag) => {
     if (/^\d+$/.test(tag)) return fullMatch;
     return (space || '') + addToken(`<span class="albaqros-tag" data-tag="${tag}">#${tag}</span>`);
   });
 
-  // 4. Bold **text**
+  // 5. Bold **text**
   s = s.replace(/\*\*(.*?)\*\*/g, (_, b) => `<strong>${b}</strong>`);
 
-  // 5. Italic *text*
+  // 6. Italic *text*
   s = s.replace(/\*(.*?)\*/g, (_, it) => `<em>${it}</em>`);
 
-  // 6. Strikethrough ~~text~~
+  // 7. Strikethrough ~~text~~
   s = s.replace(/~~(.*?)~~/g, (_, d) => `<del>${d}</del>`);
 
   // Restore tokens in single pass
@@ -326,8 +402,15 @@ export function htmlToMarkdown(html: string, tags?: string[]): string {
   const tempDiv = document.createElement('div');
   tempDiv.innerHTML = html;
 
+  // Clean empty list items from DOM tree before serializing to markdown
+  cleanAllEmptyListItems(tempDiv);
+
   const rawMd = processNodeToMarkdown(tempDiv, true);
-  const cleaned = cleanCorruptedLinks(rawMd).trim() + '\n';
+  // Ensure any bullet points or numbered markers with no words after them are purged
+  const cleaned = cleanCorruptedLinks(rawMd)
+    .replace(/^[-*]\s*$/gm, '')
+    .replace(/^\d+[.)]\s*$/gm, '')
+    .trim() + '\n';
   return attachFrontmatter(cleaned, tags);
 }
 
@@ -390,7 +473,29 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
         continue;
       }
 
+      // Check if it's an external link
+      if (tag === 'A' || el.classList.contains('albaqros-external-link')) {
+        const href = (el.getAttribute('href') || '').trim();
+        const display = processNodeToMarkdown(el).trim();
+        if (href) {
+          md += `[${display || href}](${href})`;
+        } else if (display) {
+          md += display;
+        }
+        continue;
+      }
+
       switch (tag) {
+        case 'A': {
+          const href = (el.getAttribute('href') || '').trim();
+          const display = processNodeToMarkdown(el).trim();
+          if (href) {
+            md += `[${display || href}](${href})`;
+          } else if (display) {
+            md += display;
+          }
+          break;
+        }
         case 'H1':
           md += `# ${processNodeToMarkdown(el).trim()}\n\n`;
           break;
@@ -435,23 +540,36 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           for (let j = 0; j < el.children.length; j++) {
             const li = el.children[j];
             if (li.tagName.toUpperCase() === 'LI') {
-              md += `- ${processNodeToMarkdown(li).trim()}\n`;
+              const itemText = processNodeToMarkdown(li).trim();
+              if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+                md += `- ${itemText}\n`;
+              }
             }
           }
           md += '\n';
           break;
-        case 'OL':
+        case 'OL': {
+          let olIndex = 1;
           for (let j = 0; j < el.children.length; j++) {
             const li = el.children[j];
             if (li.tagName.toUpperCase() === 'LI') {
-              md += `${j + 1}. ${processNodeToMarkdown(li).trim()}\n`;
+              const itemText = processNodeToMarkdown(li).trim();
+              if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+                md += `${olIndex}. ${itemText}\n`;
+                olIndex++;
+              }
             }
           }
           md += '\n';
           break;
-        case 'LI':
-          md += `- ${processNodeToMarkdown(el).trim()}\n`;
+        }
+        case 'LI': {
+          const singleLiText = processNodeToMarkdown(el).trim();
+          if (singleLiText && singleLiText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+            md += `- ${singleLiText}\n`;
+          }
           break;
+        }
         case 'HR':
           md += `---\n\n`;
           break;
