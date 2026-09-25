@@ -212,6 +212,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const canvasStageRef = useRef<HTMLDivElement>(null);
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const lastPasteTimeRef = useRef<number>(0);
+  const isPastingRef = useRef<boolean>(false);
   const handlePasteRef = useRef<(() => void) | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'info' } | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
@@ -365,7 +366,8 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
           (!target.matches('input, textarea, [contenteditable="true"]') &&
             !target.closest('.canvas-card-editing'))
         ) {
-          if (Date.now() - lastPasteTimeRef.current > 400) {
+          e.preventDefault();
+          if (Date.now() - lastPasteTimeRef.current > 600 && !isPastingRef.current) {
             lastPasteTimeRef.current = Date.now();
             handlePasteRef.current?.();
           }
@@ -757,18 +759,28 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   // Paste image from clipboard
   const handlePasteImageFromClipboard = useCallback(async () => {
     if (!activeCanvasPathRef.current) return;
-    const imgData = await CanvasService.readClipboardImage();
-    if (imgData && imgData.dataUrl) {
-      insertImageNode(
-        imgData.dataUrl,
-        imgData.fileName || 'Pasted Image',
-        imgData.aspectRatio,
-        undefined,
-        imgData.width,
-        imgData.height
-      );
-    } else {
-      showToast('No image in clipboard. Copy an image or screenshot first (Win+Shift+S)', 'warn');
+    if (isPastingRef.current || Date.now() - lastPasteTimeRef.current < 600) return;
+    isPastingRef.current = true;
+    lastPasteTimeRef.current = Date.now();
+
+    try {
+      const imgData = await CanvasService.readClipboardImage();
+      if (imgData && imgData.dataUrl) {
+        insertImageNode(
+          imgData.dataUrl,
+          imgData.fileName || 'Pasted Image',
+          imgData.aspectRatio,
+          undefined,
+          imgData.width,
+          imgData.height
+        );
+      } else {
+        showToast('No image in clipboard. Copy an image or screenshot first (Win+Shift+S)', 'warn');
+      }
+    } finally {
+      setTimeout(() => {
+        isPastingRef.current = false;
+      }, 600);
     }
   }, [insertImageNode, showToast]);
 
@@ -788,43 +800,49 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         return;
       }
 
-      const clipboardData = e.clipboardData;
-      if (!clipboardData) return;
+      // Guard against rapid duplicate firing
+      if (isPastingRef.current || Date.now() - lastPasteTimeRef.current < 600) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      isPastingRef.current = true;
+      lastPasteTimeRef.current = Date.now();
 
-      // 1. Check clipboard items for image file/blob
-      if (clipboardData.items && clipboardData.items.length > 0) {
-        for (let i = 0; i < clipboardData.items.length; i++) {
-          const item = clipboardData.items[i];
-          if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const blob = item.getAsFile();
-            if (blob) {
+      try {
+        const clipboardData = e.clipboardData;
+        if (!clipboardData) return;
+
+        // 1. Check clipboard items for image file/blob
+        if (clipboardData.items && clipboardData.items.length > 0) {
+          for (let i = 0; i < clipboardData.items.length; i++) {
+            const item = clipboardData.items[i];
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+              const blob = item.getAsFile();
+              if (blob) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleProcessImageBlob(blob);
+                return;
+              }
+            }
+          }
+        }
+
+        // 2. Check clipboard files
+        if (clipboardData.files && clipboardData.files.length > 0) {
+          for (let i = 0; i < clipboardData.files.length; i++) {
+            const file = clipboardData.files[i];
+            if (file.type.startsWith('image/')) {
               e.preventDefault();
               e.stopPropagation();
-              lastPasteTimeRef.current = Date.now();
-              handleProcessImageBlob(blob);
+              handleProcessImageBlob(file, undefined, file.name);
               return;
             }
           }
         }
-      }
 
-      // 2. Check clipboard files
-      if (clipboardData.files && clipboardData.files.length > 0) {
-        for (let i = 0; i < clipboardData.files.length; i++) {
-          const file = clipboardData.files[i];
-          if (file.type.startsWith('image/')) {
-            e.preventDefault();
-            e.stopPropagation();
-            lastPasteTimeRef.current = Date.now();
-            handleProcessImageBlob(file, undefined, file.name);
-            return;
-          }
-        }
-      }
-
-      // 3. Fallback to Electron native clipboard if items were not exposed in DOM
-      if (Date.now() - lastPasteTimeRef.current > 400) {
-        lastPasteTimeRef.current = Date.now();
+        // 3. Fallback to Electron native clipboard if items were not exposed in DOM
         const electronImg = await CanvasService.readClipboardImage();
         if (electronImg && electronImg.dataUrl) {
           e.preventDefault();
@@ -838,6 +856,10 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
             electronImg.height
           );
         }
+      } finally {
+        setTimeout(() => {
+          isPastingRef.current = false;
+        }, 600);
       }
     };
 
