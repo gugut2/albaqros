@@ -145,9 +145,7 @@ export function cleanCorruptedLinks(md: string): string {
 export function isListItemEmpty(li: HTMLElement | null): boolean {
   if (!li) return false;
   const raw = (li.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
-  // If string contains only spaces, bullet characters (-, *, •), or numbers with dot/bracket (e.g. 1., 2.), with no words
-  const textWithoutMarkers = raw.replace(/^([-*•]|\d+[.)])*\s*$/, '').trim();
-  if (textWithoutMarkers.length > 0) return false;
+  if (raw.length > 0) return false;
 
   // Preserve items containing media, links, or inputs
   if (li.querySelector('img, a, input, [data-note-target], [data-tag]')) {
@@ -156,7 +154,7 @@ export function isListItemEmpty(li: HTMLElement | null): boolean {
   return true;
 }
 
-// Clean and remove any bulletpoints in a container that have no words after them
+// Clean and remove any empty list items in a container
 export function cleanAllEmptyListItems(root: HTMLElement, excludeLi?: HTMLElement | null): void {
   const lists = root.querySelectorAll('ul, ol');
   lists.forEach((list) => {
@@ -175,8 +173,8 @@ export function cleanAllEmptyListItems(root: HTMLElement, excludeLi?: HTMLElemen
 export function markdownToHtml(md: string): string {
   if (!md) return '<p><br></p>';
 
-  // Sanitize corrupted links and remove any bulletpoints or numbered markers that have no words after them
-  const cleanedMd = cleanCorruptedLinks(md).replace(/^[-*]\s*$/gm, '').replace(/^\d+[.)]\s*$/gm, '');
+  // Sanitize corrupted links while preserving genuine markdown content
+  const cleanedMd = cleanCorruptedLinks(md);
   // Strip frontmatter so only clean body content is loaded into the live editor
   const { body } = extractFrontmatter(cleanedMd);
   const lines = body.split('\n');
@@ -256,19 +254,27 @@ export function markdownToHtml(md: string): string {
     // 4. Unordered bullet list (- or *)
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed === '-' || trimmed === '*') {
       const listItems: string[] = [];
-      while (
-        i < lines.length &&
-        (lines[i].trim().startsWith('- ') ||
-          lines[i].trim().startsWith('* ') ||
-          lines[i].trim() === '-' ||
-          lines[i].trim() === '*')
-      ) {
-        const itemText = lines[i].trim().replace(/^[-*]\s*/, '').trim();
-        // Delete all bulletpoints that have no words after them
-        if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+      while (i < lines.length) {
+        const curTrim = lines[i].trim();
+        if (
+          curTrim.startsWith('- ') ||
+          curTrim.startsWith('* ') ||
+          curTrim === '-' ||
+          curTrim === '*'
+        ) {
+          const itemText = curTrim.replace(/^[-*]\s*/, '').trim();
           listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+          i++;
+        } else if (
+          curTrim === '' &&
+          i + 1 < lines.length &&
+          (lines[i + 1].trim().startsWith('- ') || lines[i + 1].trim().startsWith('* '))
+        ) {
+          // Allow loose list with empty line between bullet items
+          i++;
+        } else {
+          break;
         }
-        i++;
       }
       if (listItems.length > 0) {
         htmlParts.push(
@@ -281,18 +287,32 @@ export function markdownToHtml(md: string): string {
 
     // 4b. Ordered numbered list (1. or 1))
     if (/^\d+[.)]\s*/.test(trimmed)) {
+      const startMatch = trimmed.match(/^(\d+)[.)]/);
+      const startNum = startMatch ? parseInt(startMatch[1], 10) : 1;
       const listItems: string[] = [];
-      while (i < lines.length && /^\d+[.)]\s*/.test(lines[i].trim())) {
-        const itemText = lines[i].trim().replace(/^\d+[.)]\s*/, '').trim();
-        // Delete all numbered items that have no words after them
-        if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+
+      while (i < lines.length) {
+        const curTrim = lines[i].trim();
+        if (/^\d+[.)]\s*/.test(curTrim)) {
+          const itemText = curTrim.replace(/^\d+[.)]\s*/, '').trim();
           listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+          i++;
+        } else if (
+          curTrim === '' &&
+          i + 1 < lines.length &&
+          /^\d+[.)]\s*/.test(lines[i + 1].trim())
+        ) {
+          // Allow loose list with empty line between numbered items
+          i++;
+        } else {
+          break;
         }
-        i++;
       }
+
       if (listItems.length > 0) {
+        const startAttr = startNum > 1 ? ` start="${startNum}"` : '';
         htmlParts.push(
-          `<ol style="margin: 6px 0 6px 24px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6; list-style-type: decimal;">${listItems.join('')}</ol>`
+          `<ol${startAttr} style="margin: 6px 0 6px 24px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6; list-style-type: decimal;">${listItems.join('')}</ol>`
         );
       }
       if (i < lines.length && lines[i].trim() === '') i++;
@@ -540,7 +560,8 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           for (let j = 0; j < el.children.length; j++) {
             const li = el.children[j];
             if (li.tagName.toUpperCase() === 'LI') {
-              const itemText = processNodeToMarkdown(li).trim();
+              let itemText = processNodeToMarkdown(li).trim();
+              itemText = itemText.replace(/^[-*•]\s*/, '').trim();
               if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
                 md += `- ${itemText}\n`;
               }
@@ -549,11 +570,14 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           md += '\n';
           break;
         case 'OL': {
-          let olIndex = 1;
+          const startAttr = el.getAttribute('start');
+          let olIndex = startAttr ? (parseInt(startAttr, 10) || 1) : 1;
           for (let j = 0; j < el.children.length; j++) {
             const li = el.children[j];
             if (li.tagName.toUpperCase() === 'LI') {
-              const itemText = processNodeToMarkdown(li).trim();
+              let itemText = processNodeToMarkdown(li).trim();
+              // Strip redundant leading numbered marker if typed inside the <li>
+              itemText = itemText.replace(/^\d+[.)]\s*/, '').trim();
               if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
                 md += `${olIndex}. ${itemText}\n`;
                 olIndex++;
@@ -564,9 +588,18 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           break;
         }
         case 'LI': {
-          const singleLiText = processNodeToMarkdown(el).trim();
-          if (singleLiText && singleLiText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
-            md += `- ${singleLiText}\n`;
+          let singleLiText = processNodeToMarkdown(el).trim();
+          const parentTag = el.parentElement?.tagName.toUpperCase();
+          if (parentTag === 'OL') {
+            singleLiText = singleLiText.replace(/^\d+[.)]\s*/, '').trim();
+            if (singleLiText && singleLiText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+              md += `1. ${singleLiText}\n`;
+            }
+          } else {
+            singleLiText = singleLiText.replace(/^[-*•]\s*/, '').trim();
+            if (singleLiText && singleLiText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+              md += `- ${singleLiText}\n`;
+            }
           }
           break;
         }

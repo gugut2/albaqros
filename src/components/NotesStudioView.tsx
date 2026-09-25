@@ -13,6 +13,9 @@ import {
   Sparkles,
   Link2,
   List,
+  ListOrdered,
+  CheckSquare,
+  Code,
   Bold,
   Italic,
   X,
@@ -178,9 +181,6 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
-
-    // Clean any empty bulletpoints that have no words after them before saving
-    cleanAllEmptyListItems(editorRef.current);
 
     const currentTags = activeTagsRef.current;
     const md = htmlToMarkdown(editorRef.current.innerHTML, currentTags);
@@ -796,15 +796,55 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
             return;
           }
 
-          // 1. or 1) -> Numbered / Ordered List
-          if (/^\d+[.)]$/.test(trimmed)) {
+          // - [ ] or - [x] -> Task Checkbox
+          if (trimmed === '- [ ]' || trimmed === '- [x]') {
+            e.preventDefault();
+            node.textContent = text.slice(offset);
+            const isChecked = trimmed === '- [x]';
+            const taskItem = document.createElement('div');
+            taskItem.className = 'albaqros-task-item';
+            taskItem.style.display = 'flex';
+            taskItem.style.alignItems = 'center';
+            taskItem.style.gap = '8px';
+            taskItem.style.margin = '4px 0';
+            taskItem.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''} style="cursor: pointer; accent-color: #10b981; width: 16px; height: 16px; margin: 0;"><span class="albaqros-task-text" style="font-size: 0.92rem; color: ${isChecked ? '#64748b' : '#f8fafc'}; ${isChecked ? 'text-decoration: line-through;' : ''}"><br></span>`;
+            const currentBlock = (node.parentElement?.closest('p, div')) as HTMLElement | null;
+            if (currentBlock && editorRef.current?.contains(currentBlock)) {
+              currentBlock.replaceWith(taskItem);
+            }
+            const span = taskItem.querySelector('.albaqros-task-text');
+            if (span) {
+              const newRange = document.createRange();
+              newRange.setStart(span, 0);
+              newRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+              lastRangeRef.current = newRange.cloneRange();
+            }
+            handleContentMutated();
+            return;
+          }
+
+          // 1. or 1) -> Numbered / Ordered List (preserves start number)
+          const numMatch = trimmed.match(/^(\d+)[.)]$/);
+          if (numMatch) {
             const inOl = node.parentElement?.closest('ol');
             if (inOl) {
               return;
             }
+            const numVal = parseInt(numMatch[1], 10);
             e.preventDefault();
             node.textContent = text.slice(offset);
             document.execCommand('insertOrderedList');
+            if (numVal > 1) {
+              const sel = window.getSelection();
+              const ol = (sel?.anchorNode?.nodeType === Node.ELEMENT_NODE
+                ? (sel?.anchorNode as HTMLElement).closest('ol')
+                : sel?.anchorNode?.parentElement?.closest('ol'));
+              if (ol) {
+                ol.setAttribute('start', String(numVal));
+              }
+            }
             handleContentMutated();
             return;
           }
@@ -816,6 +856,57 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     if (e.key === 'Enter') {
       const sel = window.getSelection();
       if (sel && sel.anchorNode) {
+        // Check if inside a task checkbox item
+        const taskItem = (
+          sel.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? (sel.anchorNode as HTMLElement).closest('.albaqros-task-item')
+            : sel.anchorNode.parentElement?.closest('.albaqros-task-item')
+        ) as HTMLElement | null;
+        if (taskItem) {
+          const textSpan = taskItem.querySelector('.albaqros-task-text');
+          const spanText = (textSpan?.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+          if (!spanText) {
+            // Empty task item: convert back to normal paragraph
+            e.preventDefault();
+            const p = document.createElement('p');
+            p.style.margin = '6px 0';
+            p.style.fontSize = '0.94rem';
+            p.style.lineHeight = '1.65';
+            p.style.color = '#f8fafc';
+            p.appendChild(document.createElement('br'));
+            taskItem.replaceWith(p);
+            const range = document.createRange();
+            range.setStart(p, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            lastRangeRef.current = range.cloneRange();
+            handleContentMutated();
+            return;
+          }
+
+          e.preventDefault();
+          const newTaskItem = document.createElement('div');
+          newTaskItem.className = 'albaqros-task-item';
+          newTaskItem.style.display = 'flex';
+          newTaskItem.style.alignItems = 'center';
+          newTaskItem.style.gap = '8px';
+          newTaskItem.style.margin = '4px 0';
+          newTaskItem.innerHTML = `<input type="checkbox" style="cursor: pointer; accent-color: #10b981; width: 16px; height: 16px; margin: 0;"><span class="albaqros-task-text" style="font-size: 0.92rem; color: #f8fafc;"><br></span>`;
+          taskItem.insertAdjacentElement('afterend', newTaskItem);
+          const span = newTaskItem.querySelector('.albaqros-task-text');
+          if (span) {
+            const range = document.createRange();
+            range.setStart(span, 0);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            lastRangeRef.current = range.cloneRange();
+          }
+          handleContentMutated();
+          return;
+        }
+
         const currentLi = (
           sel.anchorNode.nodeType === Node.ELEMENT_NODE
             ? (sel.anchorNode as HTMLElement).closest('li')
@@ -879,8 +970,8 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
                 const firstLi = document.createElement('li');
                 firstLi.style.margin = '3px 0';
-                firstLi.innerHTML = currentBlock.innerHTML.replace(/^\s*\d+[.)]\s*/, '');
-                if (!firstLi.innerHTML.trim()) {
+                firstLi.innerHTML = currentBlock.innerHTML.replace(/^\s*\d+[.)][\s\u00a0]*/, '');
+                if (!firstLi.textContent?.trim()) {
                   firstLi.textContent = textAfter;
                 }
 
@@ -1128,6 +1219,21 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       if (noteTarget) {
         handleWikilinkClick(noteTarget);
       }
+      return;
+    }
+
+    // 3. Task item checkbox clicked
+    const checkbox = (e.target as HTMLElement).closest('input[type="checkbox"]');
+    if (checkbox) {
+      const taskContainer = checkbox.closest('.albaqros-task-item');
+      const textSpan = taskContainer?.querySelector('.albaqros-task-text') as HTMLElement | null;
+      const isChecked = (checkbox as HTMLInputElement).checked;
+      if (textSpan) {
+        textSpan.style.color = isChecked ? '#64748b' : '#f8fafc';
+        textSpan.style.textDecoration = isChecked ? 'line-through' : 'none';
+      }
+      handleContentMutated();
+      return;
     }
   };
 
@@ -2325,8 +2431,104 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                 )}
                 </div>
 
-                {/* Right: Quick Action Buttons */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {/* Right: Quick Action Buttons & Formatting Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document.execCommand('insertOrderedList');
+                      handleContentMutated();
+                      editorRef.current?.focus();
+                    }}
+                    title="Numbered List (1. + Space)"
+                    className="btn-icon"
+                    style={{ width: '28px', height: '28px', color: '#38bdf8', borderRadius: '5px', backgroundColor: 'rgba(56, 189, 248, 0.08)' }}
+                  >
+                    <ListOrdered size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document.execCommand('insertUnorderedList');
+                      handleContentMutated();
+                      editorRef.current?.focus();
+                    }}
+                    title="Bullet List (- + Space)"
+                    className="btn-icon"
+                    style={{ width: '28px', height: '28px', color: '#cbd5e1', borderRadius: '5px' }}
+                  >
+                    <List size={14} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const taskItem = document.createElement('div');
+                      taskItem.className = 'albaqros-task-item';
+                      taskItem.style.display = 'flex';
+                      taskItem.style.alignItems = 'center';
+                      taskItem.style.gap = '8px';
+                      taskItem.style.margin = '4px 0';
+                      taskItem.innerHTML = `<input type="checkbox" style="cursor: pointer; accent-color: #10b981; width: 16px; height: 16px; margin: 0;"><span class="albaqros-task-text" style="font-size: 0.92rem; color: #f8fafc;"><br></span>`;
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0) {
+                        const range = sel.getRangeAt(0);
+                        range.deleteContents();
+                        range.insertNode(taskItem);
+                        const span = taskItem.querySelector('.albaqros-task-text');
+                        if (span) {
+                          const newRange = document.createRange();
+                          newRange.setStart(span, 0);
+                          newRange.collapse(true);
+                          sel.removeAllRanges();
+                          sel.addRange(newRange);
+                        }
+                      } else if (editorRef.current) {
+                        editorRef.current.appendChild(taskItem);
+                      }
+                      editorRef.current?.focus();
+                      handleContentMutated();
+                    }}
+                    title="Task Checklist (- [ ] + Space)"
+                    className="btn-icon"
+                    style={{ width: '28px', height: '28px', color: '#10b981', borderRadius: '5px' }}
+                  >
+                    <CheckSquare size={13} />
+                  </button>
+
+                  <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document.execCommand('bold');
+                      handleContentMutated();
+                      editorRef.current?.focus();
+                    }}
+                    title="Bold (Ctrl+B)"
+                    className="btn-icon"
+                    style={{ width: '28px', height: '28px', color: '#cbd5e1', borderRadius: '5px' }}
+                  >
+                    <Bold size={13} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      document.execCommand('italic');
+                      handleContentMutated();
+                      editorRef.current?.focus();
+                    }}
+                    title="Italic (Ctrl+I)"
+                    className="btn-icon"
+                    style={{ width: '28px', height: '28px', color: '#cbd5e1', borderRadius: '5px' }}
+                  >
+                    <Italic size={13} />
+                  </button>
+
+                  <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
                   <button
                     type="button"
                     onClick={() => openWebLinkModal()}
