@@ -24,6 +24,8 @@ import {
   ChevronDown,
   ChevronRight,
   RotateCcw,
+  Undo2,
+  Redo2,
   Layers,
   Sparkles,
   ExternalLink,
@@ -47,6 +49,11 @@ import {
 import { CanvasService } from '../services/canvasService';
 import { NotesService } from '../services/notesService';
 import { NoteMetadata } from '../types';
+
+interface CanvasHistoryEntry {
+  nodes: CanvasNode[];
+  edges: CanvasEdge[];
+}
 
 interface CanvasStudioViewProps {
   isStudioSidebarCollapsed?: boolean;
@@ -238,6 +245,15 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   const pendingInsertPosRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Canvas Undo & Redo History
+  const undoStackRef = useRef<CanvasHistoryEntry[]>([]);
+  const redoStackRef = useRef<CanvasHistoryEntry[]>([]);
+  const preMutationSnapshotRef = useRef<CanvasHistoryEntry | null>(null);
+  const [canUndo, setCanUndo] = useState<boolean>(false);
+  const [canRedo, setCanRedo] = useState<boolean>(false);
+  const handleUndoRef = useRef<() => void>(() => {});
+  const handleRedoRef = useRef<() => void>(() => {});
+
   const canvasStageRef = useRef<HTMLDivElement>(null);
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const lastPasteTimeRef = useRef<number>(0);
@@ -290,6 +306,11 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setEditingNodeId(null);
     setImageContextMenu(null);
     setCanvasContextMenu(null);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    preMutationSnapshotRef.current = null;
+    setCanUndo(false);
+    setCanRedo(false);
 
     const doc = await CanvasService.readCanvas(relativePath);
     if (doc) {
@@ -344,15 +365,133 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     [pan, zoom]
   );
 
-  // Key listeners (Space for pan, Delete/Backspace for delete, Esc to cancel)
+  // Push snapshot of nodes & edges onto undo stack
+  const pushHistorySnapshot = useCallback(
+    (customPrevState?: { nodes: CanvasNode[]; edges: CanvasEdge[] }) => {
+      const source = customPrevState || {
+        nodes: canvasData.nodes,
+        edges: canvasData.edges,
+      };
+
+      const snapshot: CanvasHistoryEntry = {
+        nodes: JSON.parse(JSON.stringify(source.nodes)),
+        edges: JSON.parse(JSON.stringify(source.edges)),
+      };
+
+      undoStackRef.current.push(snapshot);
+      if (undoStackRef.current.length > 50) {
+        undoStackRef.current.shift();
+      }
+      redoStackRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+    },
+    [canvasData]
+  );
+
+  // Undo action
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) {
+      showToast('Nothing to undo', 'info');
+      return;
+    }
+
+    const prevSnapshot = undoStackRef.current.pop()!;
+    redoStackRef.current.push({
+      nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
+      edges: JSON.parse(JSON.stringify(canvasData.edges)),
+    });
+    if (redoStackRef.current.length > 50) {
+      redoStackRef.current.shift();
+    }
+
+    const updated: CanvasData = {
+      ...canvasData,
+      nodes: prevSnapshot.nodes,
+      edges: prevSnapshot.edges,
+    };
+    setCanvasData(updated);
+    triggerSave(updated);
+
+    const validNodeIds = new Set(prevSnapshot.nodes.map((n) => n.id));
+    setSelectedNodeIds((prev) => prev.filter((id) => validNodeIds.has(id)));
+    setSelectedEdgeId((prev) => (prev && prevSnapshot.edges.some((e) => e.id === prev) ? prev : null));
+
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+    showToast('Undo', 'info');
+  }, [canvasData, showToast, triggerSave]);
+
+  // Redo action
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) {
+      showToast('Nothing to redo', 'info');
+      return;
+    }
+
+    const nextSnapshot = redoStackRef.current.pop()!;
+    undoStackRef.current.push({
+      nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
+      edges: JSON.parse(JSON.stringify(canvasData.edges)),
+    });
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+
+    const updated: CanvasData = {
+      ...canvasData,
+      nodes: nextSnapshot.nodes,
+      edges: nextSnapshot.edges,
+    };
+    setCanvasData(updated);
+    triggerSave(updated);
+
+    const validNodeIds = new Set(nextSnapshot.nodes.map((n) => n.id));
+    setSelectedNodeIds((prev) => prev.filter((id) => validNodeIds.has(id)));
+    setSelectedEdgeId((prev) => (prev && nextSnapshot.edges.some((e) => e.id === prev) ? prev : null));
+
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+    showToast('Redo', 'info');
+  }, [canvasData, showToast, triggerSave]);
+
+  handleUndoRef.current = handleUndo;
+  handleRedoRef.current = handleRedo;
+
+  // Key listeners (Space for pan, Delete/Backspace for delete, Esc to cancel, Ctrl+Z for undo, Ctrl+Y for redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isSpacePressedRef.current && !(e.target as HTMLElement).matches('input, textarea, [contenteditable="true"]')) {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target &&
+        (target.matches('input, textarea, [contenteditable="true"]') ||
+          target.closest('.canvas-card-editing'));
+
+      // Ctrl+Z -> Undo, Ctrl+Y / Ctrl+Shift+Z -> Redo
+      if (!isTyping) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedoRef.current();
+          } else {
+            handleUndoRef.current();
+          }
+          return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          handleRedoRef.current();
+          return;
+        }
+      }
+
+      if (e.code === 'Space' && !isSpacePressedRef.current && !isTyping) {
         isSpacePressedRef.current = true;
         if (canvasStageRef.current) canvasStageRef.current.style.cursor = 'grab';
       }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !(e.target as HTMLElement).matches('input, textarea, [contenteditable="true"]')) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
         if (selectedNodeIds.length > 0) {
           e.preventDefault();
           handleDeleteSelectedNodes();
@@ -392,18 +531,11 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       }
 
       // Ctrl+V -> Paste image from clipboard when not typing in text input
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-        const target = e.target as HTMLElement | null;
-        if (
-          !target ||
-          (!target.matches('input, textarea, [contenteditable="true"]') &&
-            !target.closest('.canvas-card-editing'))
-        ) {
-          e.preventDefault();
-          if (Date.now() - lastPasteTimeRef.current > 600 && !isPastingRef.current) {
-            lastPasteTimeRef.current = Date.now();
-            handlePasteRef.current?.();
-          }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !isTyping) {
+        e.preventDefault();
+        if (Date.now() - lastPasteTimeRef.current > 600 && !isPastingRef.current) {
+          lastPasteTimeRef.current = Date.now();
+          handlePasteRef.current?.();
         }
       }
     };
@@ -583,11 +715,31 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     }
 
     if (dragState) {
+      const didMove = dragState.initialNodes.some((init) => {
+        const current = canvasData.nodes.find((n) => n.id === init.id);
+        return current && (current.x !== init.x || current.y !== init.y);
+      });
+      if (didMove && preMutationSnapshotRef.current) {
+        pushHistorySnapshot(preMutationSnapshotRef.current);
+      }
+      preMutationSnapshotRef.current = null;
       setDragState(null);
       triggerSave(canvasData);
     }
 
     if (resizeState) {
+      const orig = resizeState;
+      const current = canvasData.nodes.find((n) => n.id === orig.nodeId);
+      const didResize =
+        current &&
+        (current.x !== orig.origX ||
+          current.y !== orig.origY ||
+          current.width !== orig.origW ||
+          current.height !== orig.origH);
+      if (didResize && preMutationSnapshotRef.current) {
+        pushHistorySnapshot(preMutationSnapshotRef.current);
+      }
+      preMutationSnapshotRef.current = null;
       setResizeState(null);
       triggerSave(canvasData);
     }
@@ -617,6 +769,10 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
     // Prepare drag state
     const nodesToMove = canvasData.nodes.filter((n) => newSelected.includes(n.id));
+    preMutationSnapshotRef.current = {
+      nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
+      edges: JSON.parse(JSON.stringify(canvasData.edges)),
+    };
     setDragState({
       isDragging: true,
       startX: e.clientX,
@@ -633,6 +789,11 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   ) => {
     e.stopPropagation();
     e.preventDefault();
+
+    preMutationSnapshotRef.current = {
+      nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
+      edges: JSON.parse(JSON.stringify(canvasData.edges)),
+    };
 
     setResizeState({
       nodeId: node.id,
@@ -660,6 +821,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const handleAnchorMouseUp = (e: React.MouseEvent, targetNodeId: string, targetSide: CanvasEdgeSide) => {
     e.stopPropagation();
     if (connectingFrom && connectingFrom.nodeId !== targetNodeId) {
+      pushHistorySnapshot();
       const newEdge: CanvasEdge = {
         id: `edge-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         fromNode: connectingFrom.nodeId,
@@ -679,6 +841,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Add Card Actions
   const handleAddTextCard = (pos?: { x: number; y: number }) => {
+    pushHistorySnapshot();
     let worldPos = pos;
     if (!worldPos) {
       worldPos = screenToWorld(
@@ -747,6 +910,8 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       const initialW = Math.min(540, Math.max(260, naturalWidth || 340));
       const initialH = Math.round(initialW / ratio);
 
+      pushHistorySnapshot();
+
       const newNode: CanvasNode = {
         id: `image-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         type: 'image',
@@ -769,7 +934,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       setSelectedEdgeId(null);
       showToast('Image pasted onto canvas', 'success');
     },
-    [screenToWorld, triggerSave, showToast]
+    [screenToWorld, triggerSave, showToast, pushHistorySnapshot]
   );
 
   // Helper to read and process any image File or Blob
@@ -913,6 +1078,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   };
 
   const handleAddGroupNode = (pos?: { x: number; y: number }) => {
+    pushHistorySnapshot();
     let worldPos = pos;
     if (!worldPos) {
       worldPos = screenToWorld(
@@ -978,6 +1144,8 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     );
     pendingInsertPosRef.current = null;
 
+    pushHistorySnapshot();
+
     const newNode: CanvasNode = {
       id: `note-${Date.now()}`,
       type: 'note',
@@ -1022,6 +1190,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         const text = await navigator.clipboard.readText();
         if (text && text.trim()) {
           const lines = text.trim().split('\n');
+          pushHistorySnapshot();
           const newNode: CanvasNode = {
             id: `text-${Date.now()}`,
             type: 'text',
@@ -1047,6 +1216,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Node Color change
   const handleChangeNodeColor = (nodeId: string, color: CanvasColor) => {
+    pushHistorySnapshot();
     const updatedNodes = canvasData.nodes.map((n) => (n.id === nodeId ? { ...n, color } : n));
     const updated = { ...canvasData, nodes: updatedNodes };
     setCanvasData(updated);
@@ -1056,6 +1226,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   // Delete selected nodes
   const handleDeleteSelectedNodes = () => {
     if (selectedNodeIds.length === 0) return;
+    pushHistorySnapshot();
     const remainingNodes = canvasData.nodes.filter((n) => !selectedNodeIds.includes(n.id));
     const remainingEdges = canvasData.edges.filter(
       (e) => !selectedNodeIds.includes(e.fromNode) && !selectedNodeIds.includes(e.toNode)
@@ -1068,6 +1239,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Delete edge
   const handleDeleteEdge = (edgeId: string) => {
+    pushHistorySnapshot();
     const remainingEdges = canvasData.edges.filter((e) => e.id !== edgeId);
     const updated = { ...canvasData, edges: remainingEdges };
     setCanvasData(updated);
@@ -1726,6 +1898,52 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                   <Hand size={13} />
                 </button>
               </div>
+
+              <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-subtle)', margin: '0 4px' }} />
+
+              {/* Undo / Redo */}
+              <div style={{ display: 'flex', backgroundColor: '#181d2a', borderRadius: '5px', padding: '2px', gap: '2px' }}>
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '26px',
+                    height: '24px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: 'transparent',
+                    color: canUndo ? '#ffffff' : 'rgba(255, 255, 255, 0.25)',
+                    cursor: canUndo ? 'pointer' : 'not-allowed',
+                  }}
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo2 size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '26px',
+                    height: '24px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: 'transparent',
+                    color: canRedo ? '#ffffff' : 'rgba(255, 255, 255, 0.25)',
+                    cursor: canRedo ? 'pointer' : 'not-allowed',
+                  }}
+                  title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+                >
+                  <Redo2 size={13} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -2019,6 +2237,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                           type="button"
                           className="btn-icon"
                           onClick={() => {
+                            pushHistorySnapshot();
                             const updated = {
                               nodes: canvasData.nodes.filter((n) => n.id !== node.id),
                               edges: canvasData.edges.filter((e) => e.fromNode !== node.id && e.toNode !== node.id),
@@ -2068,6 +2287,9 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                             value={editingText}
                             onChange={(e) => setEditingText(e.target.value)}
                             onBlur={() => {
+                              if (editingText !== (node.text || '')) {
+                                pushHistorySnapshot();
+                              }
                               const updatedNodes = canvasData.nodes.map((n) =>
                                 n.id === node.id ? { ...n, text: editingText } : n
                               );
@@ -2161,6 +2383,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                             title="Toggle Contain / Cover"
                             onClick={(e) => {
                               e.stopPropagation();
+                              pushHistorySnapshot();
                               const newMode: 'contain' | 'cover' = node.fitMode === 'cover' ? 'contain' : 'cover';
                               const updatedNodes: CanvasNode[] = canvasData.nodes.map((n) =>
                                 n.id === node.id ? { ...n, fitMode: newMode } : n
@@ -2180,8 +2403,9 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                             onClick={(e) => {
                               e.stopPropagation();
                               if (!node.aspectRatio) return;
+                              pushHistorySnapshot();
                               const newH = Math.round(node.width / node.aspectRatio);
-                              const updatedNodes = canvasData.nodes.map((n) =>
+                              const updatedNodes: CanvasNode[] = canvasData.nodes.map((n) =>
                                 n.id === node.id ? { ...n, height: newH } : n
                               );
                               setCanvasData({ ...canvasData, nodes: updatedNodes });
@@ -2258,12 +2482,27 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                         <input
                           type="text"
                           value={node.label || ''}
+                          onFocus={() => {
+                            preMutationSnapshotRef.current = {
+                              nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
+                              edges: JSON.parse(JSON.stringify(canvasData.edges)),
+                            };
+                          }}
                           onChange={(e) => {
                             const updatedNodes = canvasData.nodes.map((n) =>
                               n.id === node.id ? { ...n, label: e.target.value } : n
                             );
                             setCanvasData({ ...canvasData, nodes: updatedNodes });
                             triggerSave({ ...canvasData, nodes: updatedNodes });
+                          }}
+                          onBlur={() => {
+                            if (preMutationSnapshotRef.current) {
+                              const orig = preMutationSnapshotRef.current.nodes.find((n) => n.id === node.id);
+                              if (orig && orig.label !== (node.label || '')) {
+                                pushHistorySnapshot(preMutationSnapshotRef.current);
+                              }
+                              preMutationSnapshotRef.current = null;
+                            }
                           }}
                           style={{
                             background: 'transparent',
@@ -2882,6 +3121,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               onClick={() => {
                 const targetNodeId = imageContextMenu.nodeId;
                 setImageContextMenu(null);
+                pushHistorySnapshot();
                 const updatedNodes = canvasData.nodes.map((n) => {
                   if (n.id === targetNodeId) {
                     const newMode: 'contain' | 'cover' = n.fitMode === 'cover' ? 'contain' : 'cover';
@@ -2918,6 +3158,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               onClick={() => {
                 const targetNodeId = imageContextMenu.nodeId;
                 setImageContextMenu(null);
+                pushHistorySnapshot();
                 const updated = {
                   nodes: canvasData.nodes.filter((n) => n.id !== targetNodeId),
                   edges: canvasData.edges.filter((e) => e.fromNode !== targetNodeId && e.toNode !== targetNodeId),
@@ -3007,6 +3248,110 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               <LayoutGrid size={13} style={{ color: '#38bdf8' }} />
               <span>Canvas Menu</span>
             </div>
+
+            {/* Undo */}
+            <button
+              type="button"
+              disabled={!canUndo}
+              onClick={() => {
+                setCanvasContextMenu(null);
+                handleUndo();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: canUndo ? '#cbd5e1' : 'rgba(255, 255, 255, 0.25)',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                if (canUndo) {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  e.currentTarget.style.color = '#f8fafc';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = canUndo ? '#cbd5e1' : 'rgba(255, 255, 255, 0.25)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Undo2 size={13} style={{ color: canUndo ? '#818cf8' : 'rgba(255, 255, 255, 0.25)' }} />
+                <span>Undo</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  color: canUndo ? '#64748b' : 'rgba(255, 255, 255, 0.2)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                }}
+              >
+                Ctrl+Z
+              </span>
+            </button>
+
+            {/* Redo */}
+            <button
+              type="button"
+              disabled={!canRedo}
+              onClick={() => {
+                setCanvasContextMenu(null);
+                handleRedo();
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 9px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: canRedo ? '#cbd5e1' : 'rgba(255, 255, 255, 0.25)',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                transition: 'background 0.12s, color 0.12s',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => {
+                if (canRedo) {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  e.currentTarget.style.color = '#f8fafc';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = canRedo ? '#cbd5e1' : 'rgba(255, 255, 255, 0.25)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Redo2 size={13} style={{ color: canRedo ? '#818cf8' : 'rgba(255, 255, 255, 0.25)' }} />
+                <span>Redo</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  color: canRedo ? '#64748b' : 'rgba(255, 255, 255, 0.2)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                }}
+              >
+                Ctrl+Y
+              </span>
+            </button>
+
+            <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.07)', margin: '4px 0' }} />
 
             {/* Add Text Card */}
             <button
