@@ -374,4 +374,71 @@ export const CanvasService = {
       input.click();
     });
   },
+
+  // Helper to read image directly from clipboard (via Electron API or web clipboard)
+  async readClipboardImage(): Promise<{ dataUrl: string; fileName?: string; width?: number; height?: number; aspectRatio?: number } | null> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.readClipboardImage) {
+      try {
+        const res = await (window as any).electronAPI.readClipboardImage();
+        if (res && res.success && res.dataUrl) {
+          if (res.aspectRatio && res.width && res.height) {
+            return res;
+          }
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              resolve({
+                dataUrl: res.dataUrl,
+                fileName: res.fileName || 'Pasted Image',
+                width: img.naturalWidth,
+                height: img.naturalHeight,
+                aspectRatio: img.naturalWidth / (img.naturalHeight || 1),
+              });
+            };
+            img.onerror = () => resolve({ dataUrl: res.dataUrl, aspectRatio: 1.33 });
+            img.src = res.dataUrl;
+          });
+        }
+      } catch (e) {
+        console.warn('Electron clipboard read failed:', e);
+      }
+    }
+
+    // Web Clipboard API fallback
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                const img = new Image();
+                img.onload = () => {
+                  resolve({
+                    dataUrl,
+                    fileName: 'Pasted Image',
+                    width: img.naturalWidth,
+                    height: img.naturalHeight,
+                    aspectRatio: img.naturalWidth / (img.naturalHeight || 1),
+                  });
+                };
+                img.onerror = () => resolve({ dataUrl, aspectRatio: 1.33 });
+                img.src = dataUrl;
+              };
+              reader.onerror = () => resolve(null);
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+      } catch (e) {
+        // Permissions not granted or no image in clipboard
+      }
+    }
+
+    return null;
+  },
 };

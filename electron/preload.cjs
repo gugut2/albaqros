@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalFile: (filePath) => ipcRenderer.invoke('open-external-file', filePath),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+  readClipboardImage: () => ipcRenderer.invoke('clipboard-read-image'),
   onExternalDataChange: (callback) => {
     ipcRenderer.on('external-data-change', () => callback());
   },

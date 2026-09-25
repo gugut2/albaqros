@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -1417,6 +1417,48 @@ ipcMain.handle('canvas-open-folder', async (_, relativePath) => {
   } catch (err) {
     console.error('Error opening canvas folder:', err);
     return false;
+  }
+});
+
+ipcMain.handle('clipboard-read-image', async () => {
+  try {
+    const image = clipboard.readImage();
+    if (!image.isEmpty()) {
+      const size = image.getSize();
+      return {
+        success: true,
+        dataUrl: image.toDataURL(),
+        width: size.width,
+        height: size.height,
+        aspectRatio: size.width / (size.height || 1),
+      };
+    }
+
+    // Check if clipboard contains a copied image file path (e.g. from Windows Explorer)
+    const text = clipboard.readText();
+    if (text) {
+      const cleanPath = text.startsWith('file://') ? decodeURI(text.replace(/^file:\/\/\/?/, '')) : text.trim();
+      const ext = path.extname(cleanPath).toLowerCase();
+      if (['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg'].includes(ext) && fs.existsSync(cleanPath)) {
+        const fileBuf = fs.readFileSync(cleanPath);
+        const mime =
+          ext === '.svg'
+            ? 'image/svg+xml'
+            : ext === '.jpg' || ext === '.jpeg'
+            ? 'image/jpeg'
+            : `image/${ext.slice(1)}`;
+        return {
+          success: true,
+          dataUrl: `data:${mime};base64,${fileBuf.toString('base64')}`,
+          fileName: path.basename(cleanPath),
+        };
+      }
+    }
+
+    return { success: false, error: 'No image found on clipboard' };
+  } catch (err) {
+    console.error('Error reading clipboard image:', err);
+    return { success: false, error: err.message };
   }
 });
 

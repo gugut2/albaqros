@@ -14,6 +14,7 @@ import {
   Hand,
   MousePointer,
   Image as ImageIcon,
+  Clipboard,
   FileText,
   BookOpen,
   X,
@@ -209,6 +210,19 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   const canvasStageRef = useRef<HTMLDivElement>(null);
+  const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const lastPasteTimeRef = useRef<number>(0);
+  const handlePasteRef = useRef<(() => void) | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'info' } | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
+
+  const showToast = useCallback((message: string, type: 'success' | 'warn' | 'info' = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, type });
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 2800);
+  }, []);
 
   // Load canvases list
   const loadCanvases = useCallback(async (selectPath?: string) => {
@@ -342,6 +356,21 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
           setLastSavedTime(new Date());
         }
       }
+
+      // Ctrl+V -> Paste image from clipboard when not typing in text input
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        const target = e.target as HTMLElement | null;
+        if (
+          !target ||
+          (!target.matches('input, textarea, [contenteditable="true"]') &&
+            !target.closest('.canvas-card-editing'))
+        ) {
+          if (Date.now() - lastPasteTimeRef.current > 400) {
+            lastPasteTimeRef.current = Date.now();
+            handlePasteRef.current?.();
+          }
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -422,6 +451,8 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Global mouse move for Pan, Node Drag, Node Resize, Arrow Drawing
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    lastMousePosRef.current = { clientX: e.clientX, clientY: e.clientY };
+
     // 1. Panning canvas
     if (isPanning && panStartRef.current) {
       const dx = e.clientX - panStartRef.current.clientX;
@@ -634,35 +665,192 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     triggerSave(updated);
   };
 
+  // Core helper to insert an image node onto the canvas
+  const insertImageNode = useCallback(
+    (
+      dataUrl: string,
+      altName: string = 'Pasted Image',
+      aspectRatio?: number,
+      targetWorldPos?: { x: number; y: number },
+      naturalWidth?: number,
+      naturalHeight?: number
+    ) => {
+      let worldPos = targetWorldPos;
+      if (!worldPos) {
+        const stageEl = canvasStageRef.current;
+        if (lastMousePosRef.current && stageEl) {
+          const rect = stageEl.getBoundingClientRect();
+          const isInside =
+            lastMousePosRef.current.clientX >= rect.left &&
+            lastMousePosRef.current.clientX <= rect.right &&
+            lastMousePosRef.current.clientY >= rect.top &&
+            lastMousePosRef.current.clientY <= rect.bottom;
+
+          if (isInside) {
+            worldPos = screenToWorld(lastMousePosRef.current.clientX, lastMousePosRef.current.clientY);
+          } else {
+            worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          }
+        } else if (stageEl) {
+          const rect = stageEl.getBoundingClientRect();
+          worldPos = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        } else {
+          worldPos = { x: 0, y: 0 };
+        }
+      }
+
+      const ratio =
+        aspectRatio && aspectRatio > 0
+          ? aspectRatio
+          : naturalWidth && naturalHeight
+          ? naturalWidth / naturalHeight
+          : 1.33;
+      const initialW = Math.min(540, Math.max(260, naturalWidth || 340));
+      const initialH = Math.round(initialW / ratio);
+
+      const newNode: CanvasNode = {
+        id: `image-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: 'image',
+        x: Math.round(worldPos.x - initialW / 2),
+        y: Math.round(worldPos.y - initialH / 2),
+        width: initialW,
+        height: initialH,
+        src: dataUrl,
+        alt: altName,
+        aspectRatio: ratio,
+        color: 'default',
+      };
+
+      setCanvasData((prev) => {
+        const updated = { ...prev, nodes: [...prev.nodes, newNode] };
+        triggerSave(updated);
+        return updated;
+      });
+      setSelectedNodeIds([newNode.id]);
+      setSelectedEdgeId(null);
+      showToast('Image pasted onto canvas', 'success');
+    },
+    [screenToWorld, triggerSave, showToast]
+  );
+
+  // Helper to read and process any image File or Blob
+  const handleProcessImageBlob = useCallback(
+    (blob: Blob, targetWorldPos?: { x: number; y: number }, fileName?: string) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const img = new Image();
+        img.onload = () => {
+          const ratio = img.naturalWidth / (img.naturalHeight || 1);
+          insertImageNode(dataUrl, fileName || 'Pasted Image', ratio, targetWorldPos, img.naturalWidth, img.naturalHeight);
+        };
+        img.onerror = () => {
+          insertImageNode(dataUrl, fileName || 'Pasted Image', 1.33, targetWorldPos);
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(blob);
+    },
+    [insertImageNode]
+  );
+
+  // Paste image from clipboard
+  const handlePasteImageFromClipboard = useCallback(async () => {
+    if (!activeCanvasPathRef.current) return;
+    const imgData = await CanvasService.readClipboardImage();
+    if (imgData && imgData.dataUrl) {
+      insertImageNode(
+        imgData.dataUrl,
+        imgData.fileName || 'Pasted Image',
+        imgData.aspectRatio,
+        undefined,
+        imgData.width,
+        imgData.height
+      );
+    } else {
+      showToast('No image in clipboard. Copy an image or screenshot first (Win+Shift+S)', 'warn');
+    }
+  }, [insertImageNode, showToast]);
+
+  handlePasteRef.current = handlePasteImageFromClipboard;
+
+  // Window clipboard paste listener (handles Ctrl+V, image drag/paste from web, snipping tool, etc.)
+  useEffect(() => {
+    const handlePasteEvent = async (e: ClipboardEvent) => {
+      if (!activeCanvasPathRef.current) return;
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.matches('input, textarea, [contenteditable="true"]') ||
+          target.closest('.canvas-card-editing'))
+      ) {
+        return;
+      }
+
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      // 1. Check clipboard items for image file/blob
+      if (clipboardData.items && clipboardData.items.length > 0) {
+        for (let i = 0; i < clipboardData.items.length; i++) {
+          const item = clipboardData.items[i];
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const blob = item.getAsFile();
+            if (blob) {
+              e.preventDefault();
+              e.stopPropagation();
+              lastPasteTimeRef.current = Date.now();
+              handleProcessImageBlob(blob);
+              return;
+            }
+          }
+        }
+      }
+
+      // 2. Check clipboard files
+      if (clipboardData.files && clipboardData.files.length > 0) {
+        for (let i = 0; i < clipboardData.files.length; i++) {
+          const file = clipboardData.files[i];
+          if (file.type.startsWith('image/')) {
+            e.preventDefault();
+            e.stopPropagation();
+            lastPasteTimeRef.current = Date.now();
+            handleProcessImageBlob(file, undefined, file.name);
+            return;
+          }
+        }
+      }
+
+      // 3. Fallback to Electron native clipboard if items were not exposed in DOM
+      if (Date.now() - lastPasteTimeRef.current > 400) {
+        lastPasteTimeRef.current = Date.now();
+        const electronImg = await CanvasService.readClipboardImage();
+        if (electronImg && electronImg.dataUrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          insertImageNode(
+            electronImg.dataUrl,
+            electronImg.fileName || 'Pasted Image',
+            electronImg.aspectRatio,
+            undefined,
+            electronImg.width,
+            electronImg.height
+          );
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePasteEvent);
+    return () => {
+      window.removeEventListener('paste', handlePasteEvent);
+    };
+  }, [handleProcessImageBlob, insertImageNode]);
+
   const handleAddImageCard = async () => {
     const picked = await CanvasService.pickImageFile();
     if (!picked) return;
-
-    const centerWorld = screenToWorld(
-      canvasStageRef.current ? canvasStageRef.current.clientWidth / 2 : 400,
-      canvasStageRef.current ? canvasStageRef.current.clientHeight / 2 : 300
-    );
-
-    const initialW = 340;
-    const initialH = Math.round(initialW / (picked.aspectRatio || 1.33));
-
-    const newNode: CanvasNode = {
-      id: `image-${Date.now()}`,
-      type: 'image',
-      x: Math.round(centerWorld.x - initialW / 2),
-      y: Math.round(centerWorld.y - initialH / 2),
-      width: initialW,
-      height: initialH,
-      src: picked.dataUrl,
-      alt: picked.fileName,
-      aspectRatio: picked.aspectRatio,
-      color: 'default',
-    };
-
-    const updated = { ...canvasData, nodes: [...canvasData.nodes, newNode] };
-    setCanvasData(updated);
-    setSelectedNodeIds([newNode.id]);
-    triggerSave(updated);
+    insertImageNode(picked.dataUrl, picked.fileName, picked.aspectRatio);
   };
 
   const handleAddGroupNode = () => {
@@ -699,37 +887,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     if (!file.type.startsWith('image/')) return;
 
     const dropWorld = screenToWorld(e.clientX, e.clientY);
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const aspectRatio = img.naturalWidth / (img.naturalHeight || 1);
-        const w = 340;
-        const h = Math.round(w / aspectRatio);
-
-        const newNode: CanvasNode = {
-          id: `image-${Date.now()}`,
-          type: 'image',
-          x: Math.round(dropWorld.x - w / 2),
-          y: Math.round(dropWorld.y - h / 2),
-          width: w,
-          height: h,
-          src: dataUrl,
-          alt: file.name,
-          aspectRatio,
-          color: 'default',
-        };
-
-        const updated = { ...canvasData, nodes: [...canvasData.nodes, newNode] };
-        setCanvasData(updated);
-        setSelectedNodeIds([newNode.id]);
-        triggerSave(updated);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+    handleProcessImageBlob(file, dropWorld, file.name);
   };
 
   // Open note embed dialog
@@ -1371,10 +1529,21 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                 onClick={handleAddImageCard}
                 className="btn-secondary"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
-                title="Add Image Card"
+                title="Add Image Card from File"
               >
                 <ImageIcon size={14} color="#34d399" />
                 <span>+ Image</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePasteImageFromClipboard}
+                className="btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', fontSize: '0.78rem' }}
+                title="Paste Image from Clipboard (Ctrl+V)"
+              >
+                <Clipboard size={14} color="#38bdf8" />
+                <span>+ Paste Image</span>
               </button>
 
               <button
@@ -2067,6 +2236,58 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               <Maximize2 size={13} />
             </button>
           </div>
+
+          {/* Floating Toast Notification */}
+          {toast && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '68px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 60,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 16px',
+                borderRadius: '24px',
+                backgroundColor:
+                  toast.type === 'success'
+                    ? 'rgba(16, 185, 129, 0.18)'
+                    : toast.type === 'warn'
+                    ? 'rgba(245, 158, 11, 0.18)'
+                    : 'rgba(56, 189, 248, 0.18)',
+                border: `1px solid ${
+                  toast.type === 'success'
+                    ? 'rgba(16, 185, 129, 0.45)'
+                    : toast.type === 'warn'
+                    ? 'rgba(245, 158, 11, 0.45)'
+                    : 'rgba(56, 189, 248, 0.45)'
+                }`,
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+                color:
+                  toast.type === 'success'
+                    ? '#34d399'
+                    : toast.type === 'warn'
+                    ? '#fbbf24'
+                    : '#38bdf8',
+                fontSize: '0.82rem',
+                fontWeight: 500,
+                pointerEvents: 'none',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {toast.type === 'success' ? (
+                <Check size={14} />
+              ) : toast.type === 'warn' ? (
+                <Sparkles size={14} />
+              ) : (
+                <Clipboard size={14} />
+              )}
+              <span>{toast.message}</span>
+            </div>
+          )}
         </div>
       </main>
 
