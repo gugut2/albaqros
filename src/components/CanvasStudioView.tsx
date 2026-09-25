@@ -31,6 +31,7 @@ import {
   CornerDownRight,
   MoreVertical,
   Sliders,
+  Palette,
 } from 'lucide-react';
 import {
   CanvasData,
@@ -96,6 +97,16 @@ const COLOR_MAP: Record<CanvasColor, { bg: string; border: string; glow: string;
     glow: 'rgba(168, 85, 247, 0.25)',
     text: '#d8b4fe',
   },
+};
+
+const IMAGE_BORDER_COLORS: Record<CanvasColor, { name: string; hex: string; glow: string }> = {
+  default: { name: 'Default Dark', hex: 'rgba(255, 255, 255, 0.16)', glow: 'rgba(99, 102, 241, 0.15)' },
+  red: { name: 'Crimson Red', hex: '#ef4444', glow: 'rgba(239, 68, 68, 0.4)' },
+  orange: { name: 'Amber Orange', hex: '#f97316', glow: 'rgba(249, 115, 22, 0.4)' },
+  yellow: { name: 'Gold Yellow', hex: '#eab308', glow: 'rgba(234, 179, 8, 0.4)' },
+  green: { name: 'Emerald Green', hex: '#10b981', glow: 'rgba(16, 185, 129, 0.4)' },
+  blue: { name: 'Cyan / Blue', hex: '#3b82f6', glow: 'rgba(59, 130, 246, 0.4)' },
+  purple: { name: 'Amethyst Purple', hex: '#a855f7', glow: 'rgba(168, 85, 247, 0.4)' },
 };
 
 export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
@@ -209,6 +220,14 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   // Image full preview modal
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
+  // Image right-click border color context menu
+  const [imageContextMenu, setImageContextMenu] = useState<{
+    nodeId: string;
+    x: number;
+    y: number;
+    currentColor: CanvasColor;
+  } | null>(null);
+
   const canvasStageRef = useRef<HTMLDivElement>(null);
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const lastPasteTimeRef = useRef<number>(0);
@@ -259,6 +278,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setSelectedNodeIds([]);
     setSelectedEdgeId(null);
     setEditingNodeId(null);
+    setImageContextMenu(null);
 
     const doc = await CanvasService.readCanvas(relativePath);
     if (doc) {
@@ -332,6 +352,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       }
 
       if (e.key === 'Escape') {
+        setImageContextMenu(null);
         setSelectedNodeIds([]);
         setSelectedEdgeId(null);
         setEditingNodeId(null);
@@ -433,6 +454,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Background mouse down (Pan or Box Select or Deselect)
   const handleStageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setImageContextMenu(null);
     // Middle click (button 1) or Space + Left click or Hand Tool -> Pan
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand' || (e.button === 0 && e.target === canvasStageRef.current)) {
       setIsPanning(true);
@@ -1792,22 +1814,49 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
             {canvasData.nodes.map((node) => {
               const isSelected = selectedNodeIds.includes(node.id);
               const colorInfo = COLOR_MAP[(node.color as CanvasColor) || 'default'] || COLOR_MAP.default;
+              const imgBorder = IMAGE_BORDER_COLORS[(node.color as CanvasColor) || 'default'] || IMAGE_BORDER_COLORS.default;
+              const isImage = node.type === 'image';
+              const hasCustomColor = !!node.color && node.color !== 'default';
               const isEditing = editingNodeId === node.id;
 
               return (
                 <div
                   key={node.id}
                   onMouseDown={(e) => handleNodeMouseDown(e, node)}
+                  onContextMenu={(e) => {
+                    if (isImage) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedNodeIds([node.id]);
+                      setSelectedEdgeId(null);
+                      setImageContextMenu({
+                        nodeId: node.id,
+                        x: e.clientX,
+                        y: e.clientY,
+                        currentColor: (node.color as CanvasColor) || 'default',
+                      });
+                    }
+                  }}
                   style={{
                     position: 'absolute',
                     left: `${node.x}px`,
                     top: `${node.y}px`,
                     width: `${node.width}px`,
                     height: `${node.height}px`,
-                    backgroundColor: colorInfo.bg,
-                    border: `1.5px solid ${isSelected ? '#818cf8' : colorInfo.border}`,
+                    backgroundColor: isImage ? '#07090e' : colorInfo.bg,
+                    border: isImage
+                      ? hasCustomColor
+                        ? `2.5px solid ${imgBorder.hex}`
+                        : isSelected
+                        ? '2px solid #818cf8'
+                        : '1.5px solid rgba(255, 255, 255, 0.14)'
+                      : `1.5px solid ${isSelected ? '#818cf8' : colorInfo.border}`,
                     borderRadius: node.type === 'group' ? '12px' : '10px',
-                    boxShadow: isSelected
+                    boxShadow: isImage && hasCustomColor
+                      ? isSelected
+                        ? `0 0 0 2px #818cf8, 0 0 18px ${imgBorder.glow}, 0 12px 32px rgba(0, 0, 0, 0.6)`
+                        : `0 0 14px ${imgBorder.glow}, 0 6px 20px rgba(0, 0, 0, 0.45)`
+                      : isSelected
                       ? `0 0 0 2px rgba(129, 140, 248, 0.4), 0 10px 30px rgba(0, 0, 0, 0.5)`
                       : `0 4px 20px rgba(0, 0, 0, 0.35)`,
                     display: 'flex',
@@ -1815,80 +1864,79 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                     overflow: 'visible',
                     pointerEvents: 'all',
                     zIndex: isSelected ? 100 : node.zIndex || (node.type === 'group' ? 1 : 10),
-                    transition: 'border-color 0.15s',
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
                   }}
                 >
-                  {/* Card Header Drag Bar */}
-                  <div
-                    style={{
-                      padding: '6px 10px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
-                      borderBottom: `1px solid ${colorInfo.border}`,
-                      borderTopLeftRadius: '9px',
-                      borderTopRightRadius: '9px',
-                      cursor: 'move',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, color: colorInfo.text }}>
-                      {node.type === 'text' && <FileText size={13} />}
-                      {node.type === 'image' && <ImageIcon size={13} />}
-                      {node.type === 'note' && <BookOpen size={13} />}
-                      {node.type === 'group' && <Layers size={13} />}
-                      <span>
-                        {node.type === 'note'
-                          ? node.noteTitle || 'Note'
-                          : node.type === 'group'
-                          ? node.label || 'Group'
-                          : node.type === 'image'
-                          ? node.alt || 'Image'
-                          : 'Card'}
-                      </span>
-                    </div>
+                  {/* Card Header Drag Bar (Hidden for images) */}
+                  {!isImage && (
+                    <div
+                      style={{
+                        padding: '6px 10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                        borderBottom: `1px solid ${colorInfo.border}`,
+                        borderTopLeftRadius: '9px',
+                        borderTopRightRadius: '9px',
+                        cursor: 'move',
+                        userSelect: 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, color: colorInfo.text }}>
+                        {node.type === 'text' && <FileText size={13} />}
+                        {node.type === 'note' && <BookOpen size={13} />}
+                        {node.type === 'group' && <Layers size={13} />}
+                        <span>
+                          {node.type === 'note'
+                            ? node.noteTitle || 'Note'
+                            : node.type === 'group'
+                            ? node.label || 'Group'
+                            : 'Card'}
+                        </span>
+                      </div>
 
-                    {/* Node Actions Toolbar */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onMouseDown={(e) => e.stopPropagation()}>
-                      {/* Color Palette Picker */}
-                      {(['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'] as CanvasColor[]).map((c) => (
-                        <div
-                          key={c}
-                          onClick={() => handleChangeNodeColor(node.id, c)}
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            borderRadius: '50%',
-                            backgroundColor: COLOR_MAP[c].text,
-                            cursor: 'pointer',
-                            opacity: (node.color || 'default') === c ? 1 : 0.4,
-                            transform: (node.color || 'default') === c ? 'scale(1.2)' : 'none',
-                            border: '1px solid rgba(0,0,0,0.5)',
+                      {/* Node Actions Toolbar */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onMouseDown={(e) => e.stopPropagation()}>
+                        {/* Color Palette Picker */}
+                        {(['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'] as CanvasColor[]).map((c) => (
+                          <div
+                            key={c}
+                            onClick={() => handleChangeNodeColor(node.id, c)}
+                            style={{
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              backgroundColor: COLOR_MAP[c].text,
+                              cursor: 'pointer',
+                              opacity: (node.color || 'default') === c ? 1 : 0.4,
+                              transform: (node.color || 'default') === c ? 'scale(1.2)' : 'none',
+                              border: '1px solid rgba(0,0,0,0.5)',
+                            }}
+                            title={`Color ${c}`}
+                          />
+                        ))}
+
+                        {/* Delete node */}
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          onClick={() => {
+                            const updated = {
+                              nodes: canvasData.nodes.filter((n) => n.id !== node.id),
+                              edges: canvasData.edges.filter((e) => e.fromNode !== node.id && e.toNode !== node.id),
+                            };
+                            setCanvasData(updated);
+                            triggerSave(updated);
                           }}
-                          title={`Color ${c}`}
-                        />
-                      ))}
-
-                      {/* Delete node */}
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        onClick={() => {
-                          const updated = {
-                            nodes: canvasData.nodes.filter((n) => n.id !== node.id),
-                            edges: canvasData.edges.filter((e) => e.fromNode !== node.id && e.toNode !== node.id),
-                          };
-                          setCanvasData(updated);
-                          triggerSave(updated);
-                        }}
-                        title="Delete Card"
-                        style={{ width: '18px', height: '18px', padding: 0, marginLeft: '4px', color: '#f87171' }}
-                      >
-                        <X size={12} />
-                      </button>
+                          title="Delete Card"
+                          style={{ width: '18px', height: '18px', padding: 0, marginLeft: '4px', color: '#f87171' }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Card Content Area */}
                   <div
@@ -1898,6 +1946,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                       position: 'relative',
                       display: 'flex',
                       flexDirection: 'column',
+                      borderRadius: isImage ? '8px' : '0 0 9px 9px',
                     }}
                   >
                     {/* TEXT CARD */}
@@ -1960,8 +2009,22 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                           alignItems: 'center',
                           justifyContent: 'center',
                           backgroundColor: '#07090e',
+                          borderRadius: '8px',
+                          cursor: 'move',
                         }}
                         onDoubleClick={() => setPreviewImageUrl(node.src || null)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedNodeIds([node.id]);
+                          setSelectedEdgeId(null);
+                          setImageContextMenu({
+                            nodeId: node.id,
+                            x: e.clientX,
+                            y: e.clientY,
+                            currentColor: (node.color as CanvasColor) || 'default',
+                          });
+                        }}
                       >
                         {node.src ? (
                           <img
@@ -2595,6 +2658,198 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Right-click Image Border Color Context Menu */}
+      {imageContextMenu && (
+        <>
+          {/* Backdrop to close context menu on click or right-click outside */}
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9998,
+              backgroundColor: 'transparent',
+            }}
+            onClick={() => setImageContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setImageContextMenu(null);
+            }}
+          />
+
+          <div
+            style={{
+              position: 'fixed',
+              left: `${Math.min(window.innerWidth - 220, Math.max(12, imageContextMenu.x))}px`,
+              top: `${Math.min(window.innerHeight - 360, Math.max(12, imageContextMenu.y))}px`,
+              zIndex: 9999,
+              width: '210px',
+              backgroundColor: '#111520',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              borderRadius: '10px',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.7), 0 0 1px 1px rgba(255, 255, 255, 0.08)',
+              backdropFilter: 'blur(16px)',
+              padding: '6px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
+              userSelect: 'none',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {/* Context Menu Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                padding: '6px 8px 6px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                color: '#94a3b8',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.07)',
+                marginBottom: '4px',
+              }}
+            >
+              <Palette size={13} style={{ color: '#818cf8' }} />
+              <span>Border Color</span>
+            </div>
+
+            {/* Color Swatch Options */}
+            {Object.entries(IMAGE_BORDER_COLORS).map(([colorKey, info]) => {
+              const isActive = (imageContextMenu.currentColor || 'default') === colorKey;
+              return (
+                <button
+                  key={colorKey}
+                  type="button"
+                  onClick={() => {
+                    handleChangeNodeColor(imageContextMenu.nodeId, colorKey as CanvasColor);
+                    setImageContextMenu(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: isActive ? 'rgba(129, 140, 248, 0.15)' : 'transparent',
+                    color: isActive ? '#f8fafc' : '#cbd5e1',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    fontWeight: isActive ? 600 : 400,
+                    transition: 'background 0.12s, color 0.12s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span
+                      style={{
+                        width: '13px',
+                        height: '13px',
+                        borderRadius: '50%',
+                        backgroundColor: info.hex,
+                        border: colorKey === 'default' ? '1px solid rgba(255,255,255,0.4)' : `1px solid ${info.hex}`,
+                        boxShadow: isActive ? `0 0 8px ${info.glow}` : 'none',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>{info.name}</span>
+                  </div>
+                  {isActive && (
+                    <Check
+                      size={14}
+                      style={{
+                        color: info.hex === 'rgba(255, 255, 255, 0.16)' ? '#818cf8' : info.hex,
+                      }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+
+            <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.07)', margin: '4px 0' }} />
+
+            {/* Quick Actions: Toggle Fit */}
+            <button
+              type="button"
+              onClick={() => {
+                const targetNodeId = imageContextMenu.nodeId;
+                setImageContextMenu(null);
+                const updatedNodes = canvasData.nodes.map((n) => {
+                  if (n.id === targetNodeId) {
+                    const newMode: 'contain' | 'cover' = n.fitMode === 'cover' ? 'contain' : 'cover';
+                    return { ...n, fitMode: newMode };
+                  }
+                  return n;
+                });
+                setCanvasData({ ...canvasData, nodes: updatedNodes });
+                triggerSave({ ...canvasData, nodes: updatedNodes });
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 8px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#cbd5e1',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <Sliders size={13} style={{ color: '#94a3b8' }} />
+              <span>Toggle Fit Mode</span>
+            </button>
+
+            {/* Delete Image Option */}
+            <button
+              type="button"
+              onClick={() => {
+                const targetNodeId = imageContextMenu.nodeId;
+                setImageContextMenu(null);
+                const updated = {
+                  nodes: canvasData.nodes.filter((n) => n.id !== targetNodeId),
+                  edges: canvasData.edges.filter((e) => e.fromNode !== targetNodeId && e.toNode !== targetNodeId),
+                };
+                setCanvasData(updated);
+                setSelectedNodeIds([]);
+                triggerSave(updated);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 8px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#f87171',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <Trash2 size={13} />
+              <span>Delete Image</span>
+            </button>
+          </div>
+        </>
       )}
 
       {/* Full Image Preview Modal */}
