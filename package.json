@@ -12,8 +12,9 @@
     "dev:electron": "electron .",
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "build": "tsc && vite build",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist": "npm run build && electron-builder && node scripts/prepare-release.cjs",
+    "dist:win": "npm run build && electron-builder --win && node scripts/prepare-release.cjs",
+    "release:check": "node scripts/prepare-release.cjs",
     "preview": "vite preview"
   },
   "keywords": [],
@@ -69,14 +70,16 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Albaqros"
+      "shortcutName": "Albaqros",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     }
   }
 }

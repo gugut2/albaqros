@@ -496,6 +496,20 @@ export const StorageService = {
     }
   },
 
+  async openExternalUrl(url: string): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+      try {
+        return await (window as any).electronAPI.openExternalUrl(url);
+      } catch (e) {
+        console.error('Failed to open external url:', e);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+    return true;
+  },
+
   onUpdaterStatus(callback: (info: UpdateInfo) => void): (() => void) | undefined {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.onUpdaterStatus) {
       return (window as any).electronAPI.onUpdaterStatus(callback);

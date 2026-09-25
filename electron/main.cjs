@@ -1427,9 +1427,91 @@ ipcMain.handle('canvas-open-folder', async (_, relativePath) => {
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+let latestAvailableVersion = null;
+let downloadedFallbackPath = null;
+let isFallbackDownloading = false;
+
 function sendUpdaterStatus(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('updater-status', payload);
+  }
+}
+
+async function fallbackDownloadInstaller(targetVersion) {
+  if (isFallbackDownloading) return false;
+  isFallbackDownloading = true;
+  try {
+    sendUpdaterStatus({ state: 'downloading', progress: 0 });
+    const tag = targetVersion.startsWith('v') ? targetVersion : `v${targetVersion}`;
+    const apiRes = await fetch(`https://api.github.com/repos/gugut2/albaqros/releases/tags/${tag}`, {
+      headers: { 'User-Agent': 'Albaqros-App' },
+    });
+    if (!apiRes.ok) {
+      throw new Error(`GitHub release ${tag} not found (HTTP ${apiRes.status})`);
+    }
+    const releaseData = await apiRes.json();
+    const assets = releaseData.assets || [];
+    // Prioritize Albaqros-Setup or Albaqros.Setup or any .exe installer (excluding blockmap)
+    const exeAsset = assets.find(
+      (a) => a.name.toLowerCase().endsWith('.exe') && !a.name.toLowerCase().includes('blockmap')
+    );
+    if (!exeAsset || !exeAsset.browser_download_url) {
+      throw new Error(`No installer executable (.exe) found in release ${tag}`);
+    }
+
+    const tempDir = app.getPath('temp');
+    const destPath = path.join(tempDir, exeAsset.name);
+
+    const downloadRes = await fetch(exeAsset.browser_download_url, {
+      headers: { 'User-Agent': 'Albaqros-App' },
+      redirect: 'follow',
+    });
+    if (!downloadRes.ok) {
+      throw new Error(`Failed to download installer from GitHub (HTTP ${downloadRes.status})`);
+    }
+
+    const totalBytes = Number(downloadRes.headers.get('content-length')) || exeAsset.size || 0;
+    const fileStream = fs.createWriteStream(destPath);
+    const reader = downloadRes.body.getReader();
+    let transferred = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      fileStream.write(value);
+      transferred += value.length;
+      if (totalBytes > 0) {
+        const percent = Math.min(100, Math.round((transferred / totalBytes) * 100));
+        sendUpdaterStatus({
+          state: 'downloading',
+          progress: percent,
+          transferred,
+          total: totalBytes,
+        });
+      }
+    }
+    fileStream.end();
+
+    await new Promise((resolve, reject) => {
+      fileStream.on('finish', resolve);
+      fileStream.on('error', reject);
+    });
+
+    downloadedFallbackPath = destPath;
+    sendUpdaterStatus({
+      state: 'downloaded',
+      version: targetVersion,
+    });
+    return true;
+  } catch (err) {
+    console.error('Fallback download failed:', err);
+    sendUpdaterStatus({
+      state: 'error',
+      error: `Patch download failed: ${err.message}`,
+    });
+    return false;
+  } finally {
+    isFallbackDownloading = false;
   }
 }
 
@@ -1438,6 +1520,8 @@ autoUpdater.on('checking-for-update', () => {
 });
 
 autoUpdater.on('update-available', (info) => {
+  latestAvailableVersion = info.version;
+  downloadedFallbackPath = null;
   sendUpdaterStatus({
     state: 'available',
     version: info.version,
@@ -1470,8 +1554,14 @@ autoUpdater.on('update-downloaded', (info) => {
   });
 });
 
-autoUpdater.on('error', (err) => {
+autoUpdater.on('error', async (err) => {
   console.error('autoUpdater error:', err);
+  // If download failed and we know the target version, attempt smart fallback
+  if (latestAvailableVersion && !downloadedFallbackPath && !isFallbackDownloading) {
+    console.log(`[Updater] Attempting fallback installer download for v${latestAvailableVersion}...`);
+    const ok = await fallbackDownloadInstaller(latestAvailableVersion);
+    if (ok) return;
+  }
   sendUpdaterStatus({
     state: 'error',
     error: err ? err.message : 'Unknown updater error',
@@ -1513,10 +1603,24 @@ ipcMain.handle('updater-download', async () => {
       sendUpdaterStatus({ state: 'downloading', progress: 10 });
       setTimeout(() => sendUpdaterStatus({ state: 'downloading', progress: 50 }), 400);
       setTimeout(() => sendUpdaterStatus({ state: 'downloading', progress: 100 }), 800);
-      setTimeout(() => sendUpdaterStatus({ state: 'downloaded', version: '1.0.1' }), 1000);
+      setTimeout(() => sendUpdaterStatus({ state: 'downloaded', version: '1.3.1' }), 1000);
       return { success: true, isDev: true };
     }
-    await autoUpdater.downloadUpdate();
+
+    if (downloadedFallbackPath && fs.existsSync(downloadedFallbackPath)) {
+      sendUpdaterStatus({ state: 'downloaded', version: latestAvailableVersion });
+      return { success: true };
+    }
+
+    // Try standard autoUpdater download first
+    await autoUpdater.downloadUpdate().catch(async (err) => {
+      console.warn('Standard autoUpdater.downloadUpdate failed, attempting fallback:', err.message);
+      if (latestAvailableVersion) {
+        await fallbackDownloadInstaller(latestAvailableVersion);
+      } else {
+        throw err;
+      }
+    });
     return { success: true };
   } catch (err) {
     console.error('Error downloading update:', err);
@@ -1526,7 +1630,16 @@ ipcMain.handle('updater-download', async () => {
 });
 
 ipcMain.handle('updater-install', () => {
-  autoUpdater.quitAndInstall(false, true);
+  if (downloadedFallbackPath && fs.existsSync(downloadedFallbackPath)) {
+    const { spawn } = require('child_process');
+    spawn(downloadedFallbackPath, ['--updated'], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    app.quit();
+  } else {
+    autoUpdater.quitAndInstall(false, true);
+  }
 });
 
 app.whenReady().then(() => {

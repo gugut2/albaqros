@@ -462,20 +462,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {/* State: Error */}
             {updateInfo.state === 'error' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <AlertTriangle size={13} color="#f87171" />
-                  <span style={{ fontSize: '0.725rem', color: '#f87171' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                  <AlertTriangle size={13} color="#f87171" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span style={{ fontSize: '0.725rem', color: '#f87171', wordBreak: 'break-word', lineHeight: 1.3 }}>
                     {updateInfo.error || 'Failed to check for updates'}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCheckForUpdates}
-                  style={{ background: 'none', border: 'none', color: '#818cf8', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline' }}
-                >
-                  Retry
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={handleCheckForUpdates}
+                    style={{ background: 'none', border: 'none', color: '#818cf8', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                  >
+                    Retry
+                  </button>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>•</span>
+                  <button
+                    type="button"
+                    onClick={() => StorageService.openExternalUrl('https://github.com/gugut2/albaqros/releases/latest')}
+                    style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                  >
+                    Download directly from GitHub
+                  </button>
+                </div>
               </div>
             )}
           </div>
