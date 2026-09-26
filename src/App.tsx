@@ -965,16 +965,26 @@ export const App: React.FC = () => {
   const handleVaultChanged = (newVaultInfo: VaultInfo, newData?: AppData) => {
     setVaultInfo(newVaultInfo);
     if (newData) {
-      setData(newData);
+      const mergedData: AppData = {
+        ...newData,
+        settings: {
+          ...newData.settings,
+          storagePath: newVaultInfo.path,
+          activeVault: newVaultInfo.path,
+        },
+      };
+      setData(mergedData);
+      StorageService.save(mergedData);
+    } else {
+      updateData((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          storagePath: newVaultInfo.path,
+          activeVault: newVaultInfo.path,
+        },
+      }));
     }
-    updateData((prev) => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        storagePath: newVaultInfo.path,
-        activeVault: newVaultInfo.path,
-      },
-    }));
   };
 
   // --- Window Handlers ---

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink, Sparkles, RefreshCw, ArrowUpCircle, AlertTriangle } from 'lucide-react';
+import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink, Sparkles, RefreshCw, ArrowUpCircle, AlertTriangle, FileText } from 'lucide-react';
 import { AppData, AppSettings, VaultInfo, UpdateInfo } from '../types';
 import { StorageService } from '../services/storage';
 
@@ -222,6 +222,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 title="Browse for folder"
               >
                 <Folder size={13} /> Browse...
+              </button>
+            </div>
+
+            {/* Markdown Quick Links */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+              <button
+                type="button"
+                onClick={() => StorageService.openMarkdownFile('Major Goals.md')}
+                className="btn-secondary"
+                style={{ flex: 1, fontSize: '0.725rem', padding: '6px 8px', gap: '5px', justifyContent: 'center' }}
+                title="Open Major Goals.md in default markdown editor"
+              >
+                <FileText size={12} color="#818cf8" /> Open Major Goals.md
+              </button>
+              <button
+                type="button"
+                onClick={() => StorageService.openMarkdownFile('Daily Tasks.md')}
+                className="btn-secondary"
+                style={{ flex: 1, fontSize: '0.725rem', padding: '6px 8px', gap: '5px', justifyContent: 'center' }}
+                title="Open Daily Tasks.md in default markdown editor"
+              >
+                <FileText size={12} color="#38bdf8" /> Open Daily Tasks.md
               </button>
             </div>
           </div>

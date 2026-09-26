@@ -144,6 +144,28 @@ export interface VaultInfo {
   recentVaults?: RecentVault[];
 }
 
+export interface BackupSnapshot {
+  id: string;
+  fileName: string;
+  filePath: string;
+  source: 'vault' | 'emergency';
+  timestamp: string;
+  sizeBytes: number;
+  taskCount: number;
+  majorTaskCount: number;
+  entryCount: number;
+  version: number;
+}
+
+export interface SelectVaultResult {
+  success: boolean;
+  vaultInfo?: VaultInfo;
+  data?: AppData | null;
+  isEmpty?: boolean;
+  hasExistingFiles?: boolean;
+  error?: string;
+}
+
 export interface AppSettings {
   storagePath: string; // Custom Google Drive / OneDrive folder or default
   activeVault?: string; // Active Vault folder path

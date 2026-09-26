@@ -3,6 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
 const { extractThumbnail } = require('./thumbnailExtractor.cjs');
+const {
+  createBackup,
+  listBackups,
+  restoreBackup,
+  openBackupsFolder,
+  safeWriteFileSync,
+} = require('./backupManager.cjs');
+const { syncMarkdownFiles } = require('./markdownSync.cjs');
 
 app.setName('Albaqros');
 if (process.platform === 'win32') {
@@ -14,6 +22,7 @@ let isCompact = false;
 let fileWatcher = null;
 let tray = null;
 let lastLocalSaveTime = 0;
+let lastKnownGoodData = null;
 
 const PRIMARY_DATA_FILENAME = 'albaqros-data.json';
 const LEGACY_DATA_FILENAME = 'productivity-data.json';
@@ -352,7 +361,16 @@ ipcMain.handle('load-data', async () => {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(raw);
+      lastKnownGoodData = parsed;
       setupFileWatcher(filePath);
+
+      // Ensure human-readable Markdown files exist in the active vault
+      const vaultDir = getActiveVaultDirectory();
+      const majorGoalsPath = path.join(vaultDir, 'Major Goals.md');
+      if (!fs.existsSync(majorGoalsPath)) {
+        syncMarkdownFiles(vaultDir, parsed);
+      }
+
       return parsed;
     }
   } catch (err) {
@@ -389,10 +407,33 @@ ipcMain.handle('save-data', async (_, data) => {
     }
 
     const filePath = path.join(vaultDir, PRIMARY_DATA_FILENAME);
+
+    // SAFETY GUARD: Check if disk has valuable data and incoming data is unexpectedly empty
+    if (fs.existsSync(filePath)) {
+      try {
+        const rawExisting = fs.readFileSync(filePath, 'utf-8');
+        const parsedExisting = JSON.parse(rawExisting);
+        const existingTaskCount = Array.isArray(parsedExisting.tasks) ? parsedExisting.tasks.length : 0;
+        const incomingTaskCount = Array.isArray(data?.tasks) ? data.tasks.length : 0;
+
+        if (existingTaskCount > 0 && incomingTaskCount === 0) {
+          console.warn('[SafetyShield] Incoming data has 0 tasks but disk has', existingTaskCount, 'tasks! Creating emergency pre-wipe backup.');
+          createBackup(vaultDir, parsedExisting, 'emergency-pre-wipe');
+        }
+      } catch (e) {}
+    }
+
     lastLocalSaveTime = Date.now();
-    const tempPath = `${filePath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-    fs.renameSync(tempPath, filePath);
+    safeWriteFileSync(filePath, JSON.stringify(data, null, 2));
+
+    // Update in-memory reference
+    lastKnownGoodData = data;
+
+    // Automated Rolling & Emergency Backups
+    createBackup(vaultDir, data, 'auto');
+
+    // Auto-sync human-readable Markdown files (Major Goals.md, Daily Tasks.md)
+    syncMarkdownFiles(vaultDir, data);
 
     setupFileWatcher(filePath);
     return { success: true, path: filePath, vaultInfo: getVaultInfo() };
@@ -415,6 +456,14 @@ ipcMain.handle('vault-select-existing', async () => {
 
   if (!result.canceled && result.filePaths.length > 0) {
     const selectedDir = result.filePaths[0];
+
+    // Take safety snapshot of current vault data before switching
+    if (lastKnownGoodData) {
+      try {
+        createBackup(getActiveVaultDirectory(), lastKnownGoodData, 'pre-switch');
+      } catch (e) {}
+    }
+
     activeVaultPath = selectedDir;
     recordRecentVault(selectedDir);
 
@@ -422,14 +471,47 @@ ipcMain.handle('vault-select-existing', async () => {
     const dataFilePath = getActiveDataFilePath();
     let loadedData = null;
 
-    if (fs.existsSync(dataFilePath)) {
-      try {
-        const raw = fs.readFileSync(dataFilePath, 'utf-8');
-        loadedData = JSON.parse(raw);
-      } catch (e) {
-        console.error('Error parsing vault data:', e);
+    // Retry read if locked or syncing (up to 3 times with small backoff)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (fs.existsSync(dataFilePath)) {
+        try {
+          const raw = fs.readFileSync(dataFilePath, 'utf-8');
+          loadedData = JSON.parse(raw);
+          break;
+        } catch (e) {
+          console.warn(`[VaultSelect] Read attempt ${attempt + 1} error:`, e.message);
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      } else {
+        break;
       }
     }
+
+    // If still null, check if there's any backup in backups/
+    if (!loadedData) {
+      try {
+        const backupsDir = path.join(selectedDir, 'backups');
+        const latestBackup = path.join(backupsDir, 'latest.json');
+        if (fs.existsSync(latestBackup)) {
+          const raw = fs.readFileSync(latestBackup, 'utf-8');
+          loadedData = JSON.parse(raw);
+          console.log('[VaultSelect] Recovered data from latest backup in target vault!');
+          safeWriteFileSync(dataFilePath, JSON.stringify(loadedData, null, 2));
+        }
+      } catch (e) {}
+    }
+
+    if (loadedData) {
+      lastKnownGoodData = loadedData;
+      syncMarkdownFiles(selectedDir, loadedData);
+    }
+
+    // Check if the directory has any existing files or folders
+    let hasExistingFiles = false;
+    try {
+      const items = fs.readdirSync(selectedDir);
+      hasExistingFiles = items.length > 0;
+    } catch (e) {}
 
     setupFileWatcher(dataFilePath);
     return {
@@ -437,6 +519,7 @@ ipcMain.handle('vault-select-existing', async () => {
       vaultInfo,
       data: loadedData,
       isEmpty: !loadedData,
+      hasExistingFiles,
     };
   }
   return null;
@@ -465,10 +548,13 @@ ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialDat
       fs.mkdirSync(targetVaultDir, { recursive: true });
     }
 
-    // Create artifacts subfolder in vault
-    const artifactsDir = path.join(targetVaultDir, 'artifacts');
-    if (!fs.existsSync(artifactsDir)) {
-      fs.mkdirSync(artifactsDir, { recursive: true });
+    // Create subfolders in vault
+    const subdirs = ['artifacts', 'notes', 'canvas', 'backups'];
+    for (const sub of subdirs) {
+      const subPath = path.join(targetVaultDir, sub);
+      if (!fs.existsSync(subPath)) {
+        fs.mkdirSync(subPath, { recursive: true });
+      }
     }
 
     // Write vault.json metadata
@@ -487,21 +573,36 @@ ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialDat
       'utf-8'
     );
 
-    // Write initial data if provided
+    // If destination already had an albaqros-data.json, DO NOT overwrite!
     const dataFilePath = path.join(targetVaultDir, PRIMARY_DATA_FILENAME);
-    if (initialData) {
+    let finalData = initialData || null;
+
+    if (fs.existsSync(dataFilePath)) {
+      try {
+        const existingRaw = fs.readFileSync(dataFilePath, 'utf-8');
+        finalData = JSON.parse(existingRaw);
+        console.log('[VaultCreate] Detected existing data file in target directory, preserved.');
+      } catch (e) {}
+    } else if (initialData) {
       lastLocalSaveTime = Date.now();
-      fs.writeFileSync(dataFilePath, JSON.stringify(initialData, null, 2), 'utf-8');
+      safeWriteFileSync(dataFilePath, JSON.stringify(initialData, null, 2));
+      createBackup(targetVaultDir, initialData, 'vault-created');
+      syncMarkdownFiles(targetVaultDir, initialData);
     }
 
     activeVaultPath = targetVaultDir;
     recordRecentVault(targetVaultDir, cleanName);
     setupFileWatcher(dataFilePath);
 
+    if (finalData) {
+      lastKnownGoodData = finalData;
+      syncMarkdownFiles(targetVaultDir, finalData);
+    }
+
     return {
       success: true,
       vaultInfo: getVaultInfo(targetVaultDir),
-      data: initialData || null,
+      data: finalData,
     };
   } catch (err) {
     console.error('Error creating new vault:', err);
@@ -512,6 +613,13 @@ ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialDat
 ipcMain.handle('vault-switch', async (_, { vaultPath, migrateCurrentData, currentData }) => {
   if (!vaultPath || !fs.existsSync(vaultPath)) {
     return { success: false, error: 'Vault directory does not exist' };
+  }
+
+  // Pre-switch snapshot of current vault data
+  if (lastKnownGoodData) {
+    try {
+      createBackup(getActiveVaultDirectory(), lastKnownGoodData, 'pre-switch');
+    } catch (e) {}
   }
 
   activeVaultPath = vaultPath;
@@ -530,11 +638,18 @@ ipcMain.handle('vault-switch', async (_, { vaultPath, migrateCurrentData, curren
   } else if (migrateCurrentData && currentData) {
     try {
       lastLocalSaveTime = Date.now();
-      fs.writeFileSync(dataFilePath, JSON.stringify(currentData, null, 2), 'utf-8');
+      safeWriteFileSync(dataFilePath, JSON.stringify(currentData, null, 2));
+      createBackup(vaultPath, currentData, 'migration');
+      syncMarkdownFiles(vaultPath, currentData);
       loadedData = currentData;
     } catch (e) {
       console.error('Error migrating data into vault:', e);
     }
+  }
+
+  if (loadedData) {
+    lastKnownGoodData = loadedData;
+    syncMarkdownFiles(vaultPath, loadedData);
   }
 
   setupFileWatcher(dataFilePath);
@@ -549,6 +664,56 @@ ipcMain.handle('vault-open-in-explorer', async (_, targetPath) => {
   const dir = targetPath || getActiveVaultDirectory();
   if (fs.existsSync(dir)) {
     await shell.openPath(dir);
+    return true;
+  }
+  return false;
+});
+
+// Redundancy & Backups IPCs
+ipcMain.handle('backup-list', () => {
+  return listBackups(getActiveVaultDirectory());
+});
+
+ipcMain.handle('backup-create-manual', (_, note) => {
+  const vaultDir = getActiveVaultDirectory();
+  const data = lastKnownGoodData;
+  if (!data) return { success: false, error: 'No data currently loaded' };
+  const res = createBackup(vaultDir, data, note ? `manual-${note}` : 'manual');
+  return { success: Boolean(res), result: res };
+});
+
+ipcMain.handle('backup-restore', async (_, backupFilePath) => {
+  const vaultDir = getActiveVaultDirectory();
+  try {
+    const restoredData = restoreBackup(backupFilePath, vaultDir);
+    lastKnownGoodData = restoredData;
+    syncMarkdownFiles(vaultDir, restoredData);
+    setupFileWatcher(getActiveDataFilePath());
+    return { success: true, data: restoredData };
+  } catch (err) {
+    console.error('[BackupRestore] Error restoring backup:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('backup-open-folder', (_, location) => {
+  return openBackupsFolder(getActiveVaultDirectory(), location);
+});
+
+ipcMain.handle('markdown-sync-now', () => {
+  const vaultDir = getActiveVaultDirectory();
+  if (lastKnownGoodData && vaultDir) {
+    return syncMarkdownFiles(vaultDir, lastKnownGoodData);
+  }
+  return { success: false, error: 'No active vault or data loaded' };
+});
+
+ipcMain.handle('open-markdown-file', async (_, fileName) => {
+  const vaultDir = getActiveVaultDirectory();
+  const targetFile = fileName || 'Major Goals.md';
+  const filePath = path.join(vaultDir, targetFile);
+  if (fs.existsSync(filePath)) {
+    await shell.openPath(filePath);
     return true;
   }
   return false;

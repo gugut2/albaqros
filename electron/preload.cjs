@@ -38,6 +38,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('updater-status', listener);
     return () => ipcRenderer.removeListener('updater-status', listener);
   },
+  getBackups: () => ipcRenderer.invoke('backup-list'),
+  createBackup: (note) => ipcRenderer.invoke('backup-create-manual', note),
+  restoreBackup: (filePath) => ipcRenderer.invoke('backup-restore', filePath),
+  openBackupsFolder: (location) => ipcRenderer.invoke('backup-open-folder', location),
+  syncMarkdownNow: () => ipcRenderer.invoke('markdown-sync-now'),
+  openMarkdownFile: (fileName) => ipcRenderer.invoke('open-markdown-file', fileName),
   notes: {
     listNotes: () => ipcRenderer.invoke('notes-list'),
     readNote: (relativePath) => ipcRenderer.invoke('notes-read', relativePath),

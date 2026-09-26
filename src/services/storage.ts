@@ -1,4 +1,4 @@
-import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task, VaultInfo, UpdateInfo } from '../types';
+import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, Task, VaultInfo, UpdateInfo, BackupSnapshot, SelectVaultResult } from '../types';
 
 const STORAGE_KEY = 'visual_productivity_data_v1';
 
@@ -395,12 +395,7 @@ export const StorageService = {
     };
   },
 
-  async selectVaultDirectory(): Promise<{
-    success: boolean;
-    vaultInfo?: VaultInfo;
-    data?: AppData;
-    isEmpty?: boolean;
-  } | null> {
+  async selectVaultDirectory(): Promise<SelectVaultResult | null> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.selectVaultDirectory) {
       try {
         return await (window as any).electronAPI.selectVaultDirectory();
@@ -450,6 +445,74 @@ export const StorageService = {
         return await (window as any).electronAPI.openVaultInExplorer(vaultPath);
       } catch (err) {
         console.warn('Error in openVaultInExplorer IPC:', err);
+      }
+    }
+    return false;
+  },
+
+  async getBackups(): Promise<BackupSnapshot[]> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.getBackups) {
+      try {
+        return await (window as any).electronAPI.getBackups();
+      } catch (err) {
+        console.error('Error fetching backups:', err);
+      }
+    }
+    return [];
+  },
+
+  async createManualBackup(note?: string): Promise<{ success: boolean; result?: any }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.createBackup) {
+      try {
+        return await (window as any).electronAPI.createBackup(note);
+      } catch (err) {
+        console.error('Error creating manual backup:', err);
+      }
+    }
+    return { success: false };
+  },
+
+  async restoreBackup(filePath: string): Promise<{ success: boolean; data?: AppData; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.restoreBackup) {
+      try {
+        return await (window as any).electronAPI.restoreBackup(filePath);
+      } catch (err: any) {
+        console.error('Error restoring backup:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    return { success: false, error: 'Backup restore requires desktop Electron app.' };
+  },
+
+  async openBackupsFolder(location: 'vault' | 'emergency' = 'vault'): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openBackupsFolder) {
+      try {
+        return await (window as any).electronAPI.openBackupsFolder(location);
+      } catch (err) {
+        console.warn('Error opening backups folder:', err);
+      }
+    }
+    return false;
+  },
+
+  async syncMarkdownNow(): Promise<{ success: boolean; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.syncMarkdownNow) {
+      try {
+        return await (window as any).electronAPI.syncMarkdownNow();
+      } catch (err: any) {
+        console.error('Error syncing markdown files:', err);
+        return { success: false, error: err.message };
+      }
+    }
+    return { success: false, error: 'Markdown sync requires desktop Electron app.' };
+  },
+
+  async openMarkdownFile(fileName?: string): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openMarkdownFile) {
+      try {
+        return await (window as any).electronAPI.openMarkdownFile(fileName);
+      } catch (err) {
+        console.warn('Error opening markdown file:', err);
       }
     }
     return false;
