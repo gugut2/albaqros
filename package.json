@@ -15,6 +15,7 @@
     "dist": "npm run build && electron-builder && node scripts/prepare-release.cjs",
     "dist:win": "npm run build && electron-builder --win && node scripts/prepare-release.cjs",
     "release:check": "node scripts/prepare-release.cjs",
+    "release:publish": "node scripts/publish-github-release.cjs",
     "preview": "vite preview"
   },
   "keywords": [],
