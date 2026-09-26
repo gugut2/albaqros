@@ -1,6 +1,6 @@
 {
   "name": "albaqros",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Albaqros - Personal Day-to-Day Task & Reflection Companion",
   "main": "electron/main.cjs",
   "repository": {
