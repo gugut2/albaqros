@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/gugut2/albaqros?color=6366f1&label=Download%20Installer)](https://github.com/gugut2/albaqros/releases/latest)
 [![Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows&logoColor=white)](https://github.com/gugut2/albaqros/releases/latest)
 
-📥 **[Download Latest Installer (Albaqros Setup v1.3.2)](https://github.com/gugut2/albaqros/releases/download/v1.3.2/Albaqros-Setup-1.3.2.exe)**
+📥 **[Download Latest Installer (Albaqros Setup v1.4.0)](https://github.com/gugut2/albaqros/releases/download/v1.4.0/Albaqros-Setup-1.4.0.exe)**
 
 Albaqros is a local-first desktop productivity application built with **Electron**, **React**, **Vite**, and **TypeScript**. It balances deep-focus daily execution with high-level milestone progress, historical reflection, and visual analytics in a tailored dark-mode interface.
 
@@ -22,6 +22,7 @@ Albaqros is a local-first desktop productivity application built with **Electron
   - Deep-focus productivity center with dedicated tabs:
     - **Today's Agenda**: Side-by-side view with checklist on the left and full-length journal on the right.
     - **Major Projects & Goals**: Macro-milestone tracker with live progress bars.
+    - **3D Asset Library**: Completed Blender model catalog with standardized 3/4 isometric preview renders, technical specs, and scene assembly.
     - **Notes & Knowledge Hub**: Live Markdown notes with bi-directional wikilinks and folder trees.
     - **Canvas Board**: Infinite 2D visual workspace inspired by Obsidian Canvas.
     - **Analytics & Graphs**: Consistency matrices and velocity charts.
@@ -47,6 +48,23 @@ Albaqros is a local-first desktop productivity application built with **Electron
   - **Self-Critique & Reflections**: Capture techniques learned, challenges faced, and self-critiques on every piece.
 - **Side-by-Side Evolution Comparison**:
   - Select any two milestone pieces (e.g. *Piece #1 Day 1 Study* vs *Piece #6 Day 35 Finished Art*) to inspect before-and-after visual progression and celebrate your tangible creative growth over time.
+
+---
+
+### 3. 📦 3D Asset Library & Blender Scene Pipeline
+- **Dedicated Assets Hub for Completed 3D Models**:
+  - Direct cataloging and organization for completed Blender (`.blend`) models, props, characters, vehicles, and modular kits.
+- **Automated Standardized 3/4 Isometric Previews**:
+  - Headless background rendering powered directly by Blender CLI (`--factory-startup -b -noaudio`).
+  - Standardized **3/4 perspective** camera angle (45° azimuth, ~32° elevation pointing downwards) with dynamic bounding box framing, studio Workbench lighting, and cavity highlights.
+  - Generates consistent, studio-quality preview renders regardless of asset dimensions or scale.
+- **Mesh Technical Specifications**:
+  - Automatically extracts polygon/face counts, vertex counts, dimensions (X × Y × Z in meters), object counts, and material lists.
+- **Send Models Back to Blender & Scene Assembly**:
+  - **1-Click Blender Launch**: Open any model directly in Blender.
+  - **Copy Append Snippet**: One-click copy of a clean Python console snippet to immediately append or link the asset into your active scene.
+  - **Scene Assembler**: Select multiple models with checkboxes and click **"Create Blender Scene from Selected"** to generate a new assembled `.blend` scene with assets arranged on the studio floor and automatically launch Blender.
+  - **Drag & Drop**: Drop `.blend` files straight into Albaqros from Windows Explorer to import and index them.
 
 ---
 

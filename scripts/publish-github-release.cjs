@@ -94,7 +94,7 @@ function uploadAsset(uploadUrl, filePath, token) {
 }
 
 async function main() {
-  const version = '1.3.2';
+  const version = '1.4.0';
   const tag = `v${version}`;
   const owner = 'gugut2';
   const repo = 'albaqros';
@@ -109,32 +109,26 @@ async function main() {
     process.exit(1);
   }
 
-  const releaseTitle = `Albaqros v${version} - Canvas Undo/Redo, Universal Paste & Creative Enhancements`;
+  const releaseTitle = `Albaqros v${version} - 3D Asset Library & Blender Scene Pipeline`;
   const releaseNotes = `## What's New in Albaqros v${version} 🦅
 
-### 🎨 Canvas Studio Enhancements
-- **Full History Management (Undo & Redo)**:
-  - Added complete <kbd>Ctrl+Z</kbd> (Undo) and <kbd>Ctrl+Y</kbd> / <kbd>Ctrl+Shift+Z</kbd> (Redo) support across all canvas interactions.
-  - History tracking covers: adding cards, deleting cards, dragging/moving cards, resizing from any of the 8 handles, connecting/deleting arrows, card color changes, and text/label modifications.
-  - Dedicated **Undo** and **Redo** icon buttons added to the top canvas toolbar and right-click context menu.
-  - Viewport camera positions (pan and zoom) are preserved during undo/redo.
-  - Text-input focus detection ensures native text editing undo remains untouched while editing cards.
-- **Universal Clipboard Pasting (<kbd>Ctrl+V</kbd>)**:
-  - Resolved clipboard paste deadlock and unified paste handling across keyboard shortcuts, native OS paste events, and the right-click menu.
-  - **Images & Screenshots**: Paste screenshots (<kbd>Win+Shift+S</kbd>), copied image files from Windows Explorer, and browser-copied images directly into responsive image cards.
-  - **Text & Notes**: Paste copied paragraphs, markdown text, or URLs directly into auto-sized text cards.
-  - **Cursor-Aware Placement**: Pastes cards precisely at your cursor position anywhere on the infinite canvas stage.
-- **Empty Canvas Context Menu**:
-  - Right-clicking empty canvas space opens a streamlined glassmorphic menu to quickly add text cards, create group frames, embed notes from vault, browse images, paste from clipboard, fit canvas to view (<kbd>Ctrl+0</kbd>), or deselect cards.
-- **Frameless Image Cards & Glowing Color Swatches**:
-  - Removed top card headers from image cards for an edge-to-edge, aesthetic gallery view.
-  - Right-clicking any image opens a border color palette (Default, Crimson, Amber, Gold, Emerald, Cyan, Amethyst) along with quick fit mode toggling and deletion.
-  - Fixed duplicate image pasting issue when copying image blobs.
-
-### 📝 Notes Studio Polish
-- **Caret-Accurate Link Insertion**: The link tool now inserts links at the exact caret position where the cursor was last placed in the note editor.
-- **Smart Link Auto-Recognition**: Pasting URLs automatically formats them cleanly, with support for custom display titles via \`[link|custom name]\` or \`[custom name](url)\`.
-- **List & Task Preservation**: Fixed numbered list formatting to preserve sequential numbering, custom start numbers, and interactive checkbox states without markdown loss.
+### 📦 3D Asset Library for Blender Models
+- **Dedicated Studio Workspace Assets Tab**:
+  - Direct cataloging and organization for completed Blender (\`.blend\`) assets, props, characters, environments, vehicles, and modular sets.
+- **Automated Standardized 3/4 Isometric Previews**:
+  - Headless background rendering directly powered by the Blender CLI (\`--factory-startup -b -noaudio\`).
+  - Standardized **3/4 isometric perspective** camera angle (45° azimuth, ~32° elevation pointing downwards toward the bounding box center).
+  - Dynamic bounding box framing and focal distance calculation ensures every model (from small props to large buildings) is framed consistently with clean margins and no clipping.
+  - Rendered with Blender Workbench (\`STUDIO\` lighting, cavity ambient occlusion and ridge highlights, transparent background, 800×800 resolution) in ~1.5 seconds.
+- **Instant Mesh Technical Specifications**:
+  - Automatically calculates and indexes polygon/face counts, vertex counts, object counts, bounding dimensions (X × Y × Z in meters), and material lists.
+- **Send Models Back to Blender & Scene Assembly**:
+  - **1-Click Blender Launch**: Open any model directly in Blender.
+  - **Copy Append Snippet**: One-click copy of a ready-to-run Python console snippet to append or link the asset into your current active scene.
+  - **Scene Assembler**: Select multiple models with checkboxes and click **"Create Blender Scene from Selected"** to generate a new assembled \`.blend\` scene with the assets spaced along the studio floor and automatically launch Blender.
+  - **Drag & Drop**: Drag \`.blend\` files straight from Windows Explorer onto Albaqros to import and index them.
+- **Grid & Table Specification Views**:
+  - Switch between visual card grid view with large 3/4 renders and high-density table view for managing poly budgets and model dimensions.
 
 ---
 

@@ -67,4 +67,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createFolder: (folderPath) => ipcRenderer.invoke('canvas-create-folder', folderPath),
     openCanvasFolder: (relativePath) => ipcRenderer.invoke('canvas-open-folder', relativePath),
   },
+  assets: {
+    listAssets: () => ipcRenderer.invoke('assets-list'),
+    importAsset: (params) => ipcRenderer.invoke('assets-import', params),
+    selectAndImportAsset: () => ipcRenderer.invoke('assets-select-and-import'),
+    renderPreview: (assetId) => ipcRenderer.invoke('assets-render-preview', assetId),
+    updateAsset: (asset) => ipcRenderer.invoke('assets-update', asset),
+    deleteAsset: (assetId, deleteFile) => ipcRenderer.invoke('assets-delete', { assetId, deleteFile }),
+    openInBlender: (filePath) => ipcRenderer.invoke('assets-open-in-blender', filePath),
+    openAssetsFolder: () => ipcRenderer.invoke('assets-open-folder'),
+    createScene: (assetIds, sceneName) => ipcRenderer.invoke('assets-create-scene', { assetIds, sceneName }),
+    generateAppendScript: (filePath) => ipcRenderer.invoke('assets-generate-append-script', filePath),
+  },
 });

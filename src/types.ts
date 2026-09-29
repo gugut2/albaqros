@@ -306,3 +306,39 @@ export interface CanvasDocument extends CanvasMetadata {
   data: CanvasData;
 }
 
+// ==========================================
+// 3D Blender Asset Library Types
+// ==========================================
+
+export interface BlenderAssetDimensions {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface BlenderAssetMetadata {
+  vertexCount?: number;
+  faceCount?: number;
+  objectCount?: number;
+  materialCount?: number;
+  materials?: string[];
+  dimensions?: BlenderAssetDimensions;
+}
+
+export interface BlenderAsset {
+  id: string; // unique ID or relative path e.g. "asset-1729000000000" or filename
+  name: string;
+  fileName: string;
+  filePath: string; // Absolute path to the .blend file on disk
+  relativePath?: string; // Relative to vault models/
+  previewUrl?: string; // Base64 data URL for instant rendering in UI
+  previewPath?: string; // Absolute path to rendered preview PNG
+  fileSize: number; // Size in bytes
+  createdAt: string; // ISO date string
+  updatedAt: string; // ISO date string
+  category: string; // e.g. "Characters", "Props", "Environment", "Vehicles", "Architecture", "Weapons"
+  tags: string[]; // e.g. ["#lowpoly", "#cyberpunk", "#rigged"]
+  notes?: string; // Reflection notes, poly budgets, scene notes
+  metadata?: BlenderAssetMetadata;
+}
+

@@ -11,6 +11,11 @@ const {
   safeWriteFileSync,
 } = require('./backupManager.cjs');
 const { syncMarkdownFiles } = require('./markdownSync.cjs');
+const {
+  renderBlenderAssetPreview,
+  assembleAndOpenScene,
+  findBlenderExecutable,
+} = require('./blenderAssetRenderer.cjs');
 
 app.setName('Albaqros');
 if (process.platform === 'win32') {
@@ -549,7 +554,7 @@ ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialDat
     }
 
     // Create subfolders in vault
-    const subdirs = ['artifacts', 'notes', 'canvas', 'backups'];
+    const subdirs = ['artifacts', 'notes', 'canvas', 'models', 'backups'];
     for (const sub of subdirs) {
       const subPath = path.join(targetVaultDir, sub);
       if (!fs.existsSync(subPath)) {
@@ -1582,6 +1587,464 @@ ipcMain.handle('canvas-open-folder', async (_, relativePath) => {
   } catch (err) {
     console.error('Error opening canvas folder:', err);
     return false;
+  }
+});
+
+// ==========================================
+// Vault 3D Models & Blender Assets System IPCs
+// ==========================================
+
+function getVaultModelsDirectory() {
+  const vaultDir = getActiveVaultDirectory();
+  const modelsDir = path.join(vaultDir, 'models');
+  if (!fs.existsSync(modelsDir)) {
+    try {
+      fs.mkdirSync(modelsDir, { recursive: true });
+    } catch (e) {
+      console.error('Error creating models directory:', e);
+    }
+  }
+  const previewsDir = path.join(modelsDir, '.previews');
+  if (!fs.existsSync(previewsDir)) {
+    try {
+      fs.mkdirSync(previewsDir, { recursive: true });
+    } catch (e) {}
+  }
+  return modelsDir;
+}
+
+function loadVaultAssetsMetadata(modelsDir) {
+  const metaPath = path.join(modelsDir, 'assets.json');
+  if (fs.existsSync(metaPath)) {
+    try {
+      const raw = fs.readFileSync(metaPath, 'utf8');
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('Error reading assets.json:', e);
+    }
+  }
+  return [];
+}
+
+function saveVaultAssetsMetadata(modelsDir, assets) {
+  const metaPath = path.join(modelsDir, 'assets.json');
+  try {
+    fs.writeFileSync(metaPath, JSON.stringify(assets, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error writing assets.json:', e);
+  }
+}
+
+ipcMain.handle('assets-list', async () => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const previewsDir = path.join(modelsDir, '.previews');
+    let assets = loadVaultAssetsMetadata(modelsDir);
+    if (!Array.isArray(assets)) assets = [];
+
+    // Scan models directory for 3D model files
+    const supportedExts = ['.blend', '.obj', '.fbx', '.gltf', '.glb'];
+    const diskFiles = [];
+
+    function scan(currentDir) {
+      if (!fs.existsSync(currentDir)) return;
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue; // ignore .previews
+        const full = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          scan(full);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (supportedExts.includes(ext)) {
+            diskFiles.push(full);
+          }
+        }
+      }
+    }
+    scan(modelsDir);
+
+    let hasChanges = false;
+    const existingPaths = new Set(assets.map((a) => path.normalize(a.filePath).toLowerCase()));
+
+    // Auto-register unindexed files found in models directory
+    for (const diskPath of diskFiles) {
+      const norm = path.normalize(diskPath).toLowerCase();
+      if (!existingPaths.has(norm)) {
+        const ext = path.extname(diskPath);
+        const baseName = path.basename(diskPath, ext);
+        const relPath = path.relative(modelsDir, diskPath).replace(/\\/g, '/');
+        const stats = fs.statSync(diskPath);
+        const id = 'asset-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+        const previewFileName = `${id}.png`;
+        const previewPath = path.join(previewsDir, previewFileName);
+
+        const newAsset = {
+          id,
+          name: baseName,
+          fileName: path.basename(diskPath),
+          filePath: diskPath,
+          relativePath: relPath,
+          previewPath,
+          previewUrl: '',
+          fileSize: stats.size,
+          createdAt: stats.birthtime ? stats.birthtime.toISOString() : new Date().toISOString(),
+          updatedAt: stats.mtime ? stats.mtime.toISOString() : new Date().toISOString(),
+          category: 'Props',
+          tags: [],
+          notes: '',
+          metadata: {},
+        };
+        assets.push(newAsset);
+        existingPaths.add(norm);
+        hasChanges = true;
+      }
+    }
+
+    // Populate previewUrl (base64 data URL) for all assets
+    for (const asset of assets) {
+      if (!fs.existsSync(asset.filePath)) {
+        continue;
+      }
+      const previewFile = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+      asset.previewPath = previewFile;
+
+      if (fs.existsSync(previewFile)) {
+        try {
+          const buf = fs.readFileSync(previewFile);
+          asset.previewUrl = `data:image/png;base64,${buf.toString('base64')}`;
+        } catch (e) {}
+      } else if (asset.fileName && asset.fileName.toLowerCase().endsWith('.blend')) {
+        // If preview doesn't exist yet for a .blend file, render it in 3/4 isometric perspective
+        try {
+          const renderResult = await renderBlenderAssetPreview(asset.filePath, previewFile);
+          if (renderResult.success && renderResult.dataUrl) {
+            asset.previewUrl = renderResult.dataUrl;
+            if (renderResult.metadata) {
+              asset.metadata = { ...asset.metadata, ...renderResult.metadata };
+            }
+            hasChanges = true;
+          }
+        } catch (rErr) {
+          console.error('Error auto-rendering preview for asset:', asset.name, rErr);
+        }
+      }
+    }
+
+    if (hasChanges) {
+      saveVaultAssetsMetadata(modelsDir, assets);
+    }
+
+    return { success: true, assets, modelsDir };
+  } catch (err) {
+    console.error('Error listing assets:', err);
+    return { success: false, error: err.message, assets: [] };
+  }
+});
+
+ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault }) => {
+  try {
+    if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
+      return { success: false, error: 'Source file does not exist' };
+    }
+
+    const modelsDir = getVaultModelsDirectory();
+    const previewsDir = path.join(modelsDir, '.previews');
+    const ext = path.extname(sourceFilePath).toLowerCase();
+    const baseName = (name || path.basename(sourceFilePath, ext)).replace(/[\\/:*?"<>|]/g, '').trim();
+
+    let targetFilePath = sourceFilePath;
+    const shouldCopy = copyToVault !== false;
+
+    if (shouldCopy) {
+      let finalFileName = `${baseName}${ext}`;
+      targetFilePath = path.join(modelsDir, finalFileName);
+      let counter = 1;
+      while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
+        finalFileName = `${baseName} (${counter})${ext}`;
+        targetFilePath = path.join(modelsDir, finalFileName);
+        counter++;
+      }
+      if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
+        fs.copyFileSync(sourceFilePath, targetFilePath);
+      }
+    }
+
+    const id = 'asset-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const previewPngPath = path.join(previewsDir, `${id}.png`);
+    let dataUrl = '';
+    let metadata = {};
+
+    if (ext === '.blend') {
+      const renderRes = await renderBlenderAssetPreview(targetFilePath, previewPngPath);
+      if (renderRes.success) {
+        dataUrl = renderRes.dataUrl;
+        metadata = renderRes.metadata || {};
+      }
+    }
+
+    const stats = fs.statSync(targetFilePath);
+    const newAsset = {
+      id,
+      name: baseName,
+      fileName: path.basename(targetFilePath),
+      filePath: targetFilePath,
+      relativePath: path.relative(modelsDir, targetFilePath).replace(/\\/g, '/'),
+      previewUrl: dataUrl,
+      previewPath: previewPngPath,
+      fileSize: stats.size,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      category: category || 'Props',
+      tags: tags || [],
+      notes: notes || '',
+      metadata,
+    };
+
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const idx = assets.findIndex((a) => path.normalize(a.filePath).toLowerCase() === path.normalize(targetFilePath).toLowerCase());
+    if (idx >= 0) {
+      assets[idx] = newAsset;
+    } else {
+      assets.unshift(newAsset);
+    }
+    saveVaultAssetsMetadata(modelsDir, assets);
+
+    return { success: true, asset: newAsset };
+  } catch (err) {
+    console.error('Error importing asset:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-select-and-import', async () => {
+  if (!mainWindow) return { success: false, error: 'No window' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Completed Blender Model',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Blender 3D Models', extensions: ['blend'] },
+      { name: 'All 3D Formats', extensions: ['blend', 'obj', 'fbx', 'gltf', 'glb'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, canceled: true };
+  }
+
+  const imported = [];
+  for (const filePath of result.filePaths) {
+    try {
+      const modelsDir = getVaultModelsDirectory();
+      const previewsDir = path.join(modelsDir, '.previews');
+      const ext = path.extname(filePath);
+      const baseName = path.basename(filePath, ext);
+      let targetFilePath = path.join(modelsDir, `${baseName}${ext}`);
+      let counter = 1;
+      while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
+        targetFilePath = path.join(modelsDir, `${baseName} (${counter})${ext}`);
+        counter++;
+      }
+      if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
+        fs.copyFileSync(filePath, targetFilePath);
+      }
+
+      const id = 'asset-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+      const previewPngPath = path.join(previewsDir, `${id}.png`);
+      let dataUrl = '';
+      let metadata = {};
+
+      if (ext.toLowerCase() === '.blend') {
+        const renderRes = await renderBlenderAssetPreview(targetFilePath, previewPngPath);
+        if (renderRes.success) {
+          dataUrl = renderRes.dataUrl;
+          metadata = renderRes.metadata || {};
+        }
+      }
+
+      const stats = fs.statSync(targetFilePath);
+      const asset = {
+        id,
+        name: baseName,
+        fileName: path.basename(targetFilePath),
+        filePath: targetFilePath,
+        relativePath: path.relative(modelsDir, targetFilePath).replace(/\\/g, '/'),
+        previewUrl: dataUrl,
+        previewPath: previewPngPath,
+        fileSize: stats.size,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        category: 'Props',
+        tags: [],
+        notes: '',
+        metadata,
+      };
+
+      const assets = loadVaultAssetsMetadata(modelsDir);
+      const idx = assets.findIndex((a) => path.normalize(a.filePath).toLowerCase() === path.normalize(targetFilePath).toLowerCase());
+      if (idx >= 0) assets[idx] = asset;
+      else assets.unshift(asset);
+      saveVaultAssetsMetadata(modelsDir, assets);
+      imported.push(asset);
+    } catch (err) {
+      console.error('Error importing file:', filePath, err);
+    }
+  }
+
+  return { success: true, assets: imported };
+});
+
+ipcMain.handle('assets-render-preview', async (_, assetId) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const previewsDir = path.join(modelsDir, '.previews');
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) {
+      return { success: false, error: 'Asset not found' };
+    }
+    if (!fs.existsSync(asset.filePath)) {
+      return { success: false, error: 'Model file does not exist on disk' };
+    }
+
+    const previewPngPath = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+    const renderRes = await renderBlenderAssetPreview(asset.filePath, previewPngPath);
+    if (!renderRes.success) {
+      return { success: false, error: renderRes.error };
+    }
+
+    asset.previewUrl = renderRes.dataUrl;
+    asset.previewPath = previewPngPath;
+    if (renderRes.metadata) {
+      asset.metadata = { ...asset.metadata, ...renderRes.metadata };
+    }
+    asset.updatedAt = new Date().toISOString();
+    saveVaultAssetsMetadata(modelsDir, assets);
+
+    return { success: true, asset };
+  } catch (err) {
+    console.error('Error re-rendering asset preview:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-update', async (_, updatedAsset) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const idx = assets.findIndex((a) => a.id === updatedAsset.id);
+    if (idx >= 0) {
+      assets[idx] = {
+        ...assets[idx],
+        ...updatedAsset,
+        updatedAt: new Date().toISOString(),
+      };
+      saveVaultAssetsMetadata(modelsDir, assets);
+      return { success: true, asset: assets[idx] };
+    }
+    return { success: false, error: 'Asset not found' };
+  } catch (err) {
+    console.error('Error updating asset:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-delete', async (_, { assetId, deleteFile }) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    let assets = loadVaultAssetsMetadata(modelsDir);
+    const target = assets.find((a) => a.id === assetId);
+    if (!target) return { success: false, error: 'Asset not found' };
+
+    if (deleteFile) {
+      if (fs.existsSync(target.filePath)) {
+        try { fs.unlinkSync(target.filePath); } catch (e) {}
+      }
+      if (target.previewPath && fs.existsSync(target.previewPath)) {
+        try { fs.unlinkSync(target.previewPath); } catch (e) {}
+      }
+    }
+
+    assets = assets.filter((a) => a.id !== assetId);
+    saveVaultAssetsMetadata(modelsDir, assets);
+    return { success: true };
+  } catch (err) {
+    console.error('Error deleting asset:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-open-in-blender', async (_, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { success: false, error: 'File does not exist: ' + filePath };
+    }
+    const blenderExe = findBlenderExecutable();
+    if (blenderExe) {
+      exec(`"${blenderExe}" "${filePath}"`, () => {});
+      return { success: true };
+    } else {
+      await shell.openPath(filePath);
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('Error opening file in Blender:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-open-folder', async () => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    await shell.openPath(modelsDir);
+    return { success: true, modelsDir };
+  } catch (err) {
+    console.error('Error opening models folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-create-scene', async (_, { assetIds, sceneName }) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const selected = assets.filter((a) => assetIds.includes(a.id) && fs.existsSync(a.filePath));
+    if (selected.length === 0) {
+      return { success: false, error: 'No valid assets selected' };
+    }
+
+    const cleanSceneName = (sceneName || 'Assembled_Scene_' + Date.now()).replace(/[\\/:*?"<>|]/g, '').trim();
+    const outScenePath = path.join(modelsDir, `${cleanSceneName}.blend`);
+    const filePaths = selected.map((a) => a.filePath);
+
+    const res = await assembleAndOpenScene(filePaths, outScenePath);
+    return res;
+  } catch (err) {
+    console.error('Error creating scene from assets:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-generate-append-script', async (_, filePath) => {
+  try {
+    const safePath = (filePath || '').replace(/\\/g, '/');
+    const snippet = `# Run this in Blender's Python Console to append the asset into your current scene:
+import bpy
+
+asset_path = r"${safePath}"
+with bpy.data.libraries.load(asset_path) as (data_from, data_to):
+    data_to.objects = data_from.objects
+
+for obj in data_to.objects:
+    if obj is not None:
+        bpy.context.collection.objects.link(obj)
+
+print("Successfully imported objects from " + asset_path)
+`;
+    return { success: true, script: snippet };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
