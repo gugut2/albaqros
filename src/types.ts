@@ -342,3 +342,43 @@ export interface BlenderAsset {
   metadata?: BlenderAssetMetadata;
 }
 
+// ==========================================
+// 2D Creative Art & Asset Library Types
+// ==========================================
+
+export type Art2DSoftware = 'krita' | 'photoshop' | 'clipstudio' | 'image' | 'vector' | 'other';
+
+export interface Art2DAssetMetadata {
+  width?: number; // Canvas width in px
+  height?: number; // Canvas height in px
+  aspectRatio?: number; // width / height
+  resolutionLabel?: string; // e.g. "4K UHD", "1080p", "Square", "Custom"
+  format?: string; // 'kra', 'psd', 'png', 'jpg', 'webp', 'svg', etc.
+  colorMode?: string; // 'RGB', 'CMYK', 'Grayscale', 'RGBA'
+  bitDepth?: number; // 8, 16, 32
+  channels?: number;
+  software?: Art2DSoftware;
+  layerCount?: number;
+  dpi?: number;
+  hasAlpha?: boolean;
+}
+
+export interface Art2DAsset {
+  id: string; // unique ID e.g. "art-1729000000000-xyz"
+  name: string; // Clean display name (editable)
+  fileName: string; // File name on disk e.g. "cyberpunk_cityscape.kra"
+  filePath: string; // Absolute path to file on disk
+  relativePath?: string; // Relative to vault art/
+  previewUrl?: string; // Base64 data URL for instant rendering in UI
+  previewPath?: string; // Absolute path to rendered preview PNG in .previews
+  fileSize: number; // Size in bytes
+  createdAt: string; // ISO date string
+  updatedAt: string; // ISO date string
+  category: string; // e.g. "Illustrations", "Character Design", "Concept Art", "Environments", "Sketches & Studies", "Sprites & Pixel Art", "UI & Graphic Design", "Textures & Patterns", "WIP / In Progress", "Other"
+  tags: string[]; // e.g. ["#digitalart", "#krita", "#portrait", "#wip"]
+  notes?: string; // Artist reflection, brush notes, reference links, technique notes
+  metadata?: Art2DAssetMetadata;
+  software?: Art2DSoftware;
+}
+
+

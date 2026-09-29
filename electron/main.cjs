@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, shell, clipboard, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { autoUpdater } = require('electron-updater');
@@ -16,6 +16,12 @@ const {
   assembleAndOpenScene,
   findBlenderExecutable,
 } = require('./blenderAssetRenderer.cjs');
+const {
+  findKritaExecutable,
+  findPhotoshopExecutable,
+  inspectArtworkMetadata,
+  extractAndSave2DPreview,
+} = require('./artAssetExtractor.cjs');
 
 app.setName('Albaqros');
 if (process.platform === 'win32') {
@@ -554,7 +560,7 @@ ipcMain.handle('vault-create-new', async (_, { vaultName, parentPath, initialDat
     }
 
     // Create subfolders in vault
-    const subdirs = ['artifacts', 'notes', 'canvas', 'models', 'backups'];
+    const subdirs = ['artifacts', 'notes', 'canvas', 'models', 'art', 'backups'];
     for (const sub of subdirs) {
       const subPath = path.join(targetVaultDir, sub);
       if (!fs.existsSync(subPath)) {
@@ -2044,6 +2050,541 @@ print("Successfully imported objects from " + asset_path)
 `;
     return { success: true, script: snippet };
   } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ==========================================
+// Vault 2D Creative Art & Asset System IPCs
+// ==========================================
+
+function getVaultArtDirectory() {
+  const vaultDir = getActiveVaultDirectory();
+  const artDir = path.join(vaultDir, 'art');
+  if (!fs.existsSync(artDir)) {
+    try {
+      fs.mkdirSync(artDir, { recursive: true });
+    } catch (e) {
+      console.error('Error creating art directory:', e);
+    }
+  }
+  const previewsDir = path.join(artDir, '.previews');
+  if (!fs.existsSync(previewsDir)) {
+    try {
+      fs.mkdirSync(previewsDir, { recursive: true });
+    } catch (e) {}
+  }
+  return artDir;
+}
+
+function loadVaultArtMetadata(artDir) {
+  const metaPath = path.join(artDir, 'assets.json');
+  if (fs.existsSync(metaPath)) {
+    try {
+      const raw = fs.readFileSync(metaPath, 'utf8');
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('Error reading art assets.json:', e);
+    }
+  }
+  return [];
+}
+
+function saveVaultArtMetadata(artDir, assets) {
+  const metaPath = path.join(artDir, 'assets.json');
+  try {
+    fs.writeFileSync(metaPath, JSON.stringify(assets, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error writing art assets.json:', e);
+  }
+}
+
+ipcMain.handle('art2d-list', async () => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const previewsDir = path.join(artDir, '.previews');
+    let assets = loadVaultArtMetadata(artDir);
+    if (!Array.isArray(assets)) assets = [];
+
+    // Scan art directory for 2D creative and image files
+    const supportedExts = ['.kra', '.psd', '.psb', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.clip', '.bmp', '.gif', '.tiff'];
+    const diskFiles = [];
+
+    function scan(currentDir) {
+      if (!fs.existsSync(currentDir)) return;
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue; // ignore .previews
+        const full = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          scan(full);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (supportedExts.includes(ext)) {
+            diskFiles.push(full);
+          }
+        }
+      }
+    }
+    scan(artDir);
+
+    let hasChanges = false;
+    const existingPaths = new Set(assets.map((a) => path.normalize(a.filePath).toLowerCase()));
+
+    // Auto-register unindexed files found in art directory
+    for (const diskPath of diskFiles) {
+      const norm = path.normalize(diskPath).toLowerCase();
+      if (!existingPaths.has(norm)) {
+        const ext = path.extname(diskPath).toLowerCase();
+        const baseName = path.basename(diskPath, ext);
+        const relPath = path.relative(artDir, diskPath).replace(/\\/g, '/');
+        const stats = fs.statSync(diskPath);
+        const id = 'art-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+        const previewFileName = `${id}.png`;
+        const previewPath = path.join(previewsDir, previewFileName);
+
+        const newAsset = {
+          id,
+          name: baseName,
+          fileName: path.basename(diskPath),
+          filePath: diskPath,
+          relativePath: relPath,
+          previewPath,
+          previewUrl: '',
+          fileSize: stats.size,
+          createdAt: stats.birthtime ? stats.birthtime.toISOString() : new Date().toISOString(),
+          updatedAt: stats.mtime ? stats.mtime.toISOString() : new Date().toISOString(),
+          category: 'Illustrations',
+          tags: [],
+          notes: '',
+          metadata: inspectArtworkMetadata(diskPath),
+          software: ext === '.kra' ? 'krita' : (ext === '.psd' || ext === '.psb' ? 'photoshop' : (ext === '.clip' ? 'clipstudio' : (ext === '.svg' ? 'vector' : 'image'))),
+        };
+        assets.push(newAsset);
+        existingPaths.add(norm);
+        hasChanges = true;
+      }
+    }
+
+    // Populate previewUrl (base64 data URL) and verify thumbnail files on disk
+    for (const asset of assets) {
+      if (!fs.existsSync(asset.filePath)) {
+        continue;
+      }
+      const previewFile = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+      asset.previewPath = previewFile;
+
+      if (fs.existsSync(previewFile)) {
+        try {
+          const buf = fs.readFileSync(previewFile);
+          asset.previewUrl = `data:image/png;base64,${buf.toString('base64')}`;
+        } catch (e) {}
+      } else {
+        // Preview missing, generate/extract it
+        try {
+          const res = await extractAndSave2DPreview(asset.filePath, previewFile, nativeImage);
+          if (res.success && res.dataUrl) {
+            asset.previewUrl = res.dataUrl;
+            if (res.metadata) {
+              asset.metadata = { ...asset.metadata, ...res.metadata };
+            }
+            hasChanges = true;
+          }
+        } catch (pErr) {
+          console.error('Error auto-extracting preview for asset:', asset.name, pErr);
+        }
+      }
+    }
+
+    if (hasChanges) {
+      saveVaultArtMetadata(artDir, assets);
+    }
+
+    return { success: true, assets, artDir };
+  } catch (err) {
+    console.error('Error listing 2D art assets:', err);
+    return { success: false, error: err.message, assets: [] };
+  }
+});
+
+ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault }) => {
+  try {
+    if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
+      return { success: false, error: 'Source file does not exist' };
+    }
+
+    const artDir = getVaultArtDirectory();
+    const previewsDir = path.join(artDir, '.previews');
+    const ext = path.extname(sourceFilePath).toLowerCase();
+    const baseName = (name || path.basename(sourceFilePath, ext)).replace(/[\\/:*?"<>|]/g, '').trim();
+
+    let targetFilePath = sourceFilePath;
+    const shouldCopy = copyToVault !== false;
+
+    if (shouldCopy) {
+      let finalFileName = `${baseName}${ext}`;
+      targetFilePath = path.join(artDir, finalFileName);
+      let counter = 1;
+      while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
+        finalFileName = `${baseName} (${counter})${ext}`;
+        targetFilePath = path.join(artDir, finalFileName);
+        counter++;
+      }
+      if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
+        fs.copyFileSync(sourceFilePath, targetFilePath);
+      }
+    }
+
+    const id = 'art-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const previewPngPath = path.join(previewsDir, `${id}.png`);
+
+    const previewRes = await extractAndSave2DPreview(targetFilePath, previewPngPath, nativeImage);
+    const stats = fs.statSync(targetFilePath);
+
+    const softwareType = ext === '.kra' ? 'krita' : (ext === '.psd' || ext === '.psb' ? 'photoshop' : (ext === '.clip' ? 'clipstudio' : (ext === '.svg' ? 'vector' : 'image')));
+
+    const newAsset = {
+      id,
+      name: baseName,
+      fileName: path.basename(targetFilePath),
+      filePath: targetFilePath,
+      relativePath: path.relative(artDir, targetFilePath).replace(/\\/g, '/'),
+      previewUrl: previewRes.dataUrl || '',
+      previewPath: previewPngPath,
+      fileSize: stats.size,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      category: category || 'Illustrations',
+      tags: tags || [],
+      notes: notes || '',
+      metadata: previewRes.metadata || inspectArtworkMetadata(targetFilePath),
+      software: softwareType,
+    };
+
+    const assets = loadVaultArtMetadata(artDir);
+    const idx = assets.findIndex((a) => path.normalize(a.filePath).toLowerCase() === path.normalize(targetFilePath).toLowerCase());
+    if (idx >= 0) {
+      assets[idx] = newAsset;
+    } else {
+      assets.unshift(newAsset);
+    }
+    saveVaultArtMetadata(artDir, assets);
+
+    return { success: true, asset: newAsset };
+  } catch (err) {
+    console.error('Error importing 2D art asset:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-select-and-import', async () => {
+  if (!mainWindow) return { success: false, error: 'No window' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Artwork or Project Files to Add to Library',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: 'All 2D Creative Art & Projects',
+        extensions: ['kra', 'psd', 'psb', 'png', 'jpg', 'jpeg', 'webp', 'svg', 'clip', 'bmp', 'gif', 'tiff'],
+      },
+      { name: 'Krita Documents (*.kra)', extensions: ['kra'] },
+      { name: 'Photoshop Documents (*.psd, *.psb)', extensions: ['psd', 'psb'] },
+      { name: 'Standard Images (*.png, *.jpg, *.webp, *.svg)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif', 'bmp'] },
+      { name: 'All Files (*.*)', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, canceled: true };
+  }
+
+  const artDir = getVaultArtDirectory();
+  const previewsDir = path.join(artDir, '.previews');
+  const imported = [];
+
+  for (const filePath of result.filePaths) {
+    try {
+      const ext = path.extname(filePath).toLowerCase();
+      const baseName = path.basename(filePath, ext);
+      let targetFilePath = path.join(artDir, `${baseName}${ext}`);
+      let counter = 1;
+      while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
+        targetFilePath = path.join(artDir, `${baseName} (${counter})${ext}`);
+        counter++;
+      }
+      if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
+        fs.copyFileSync(filePath, targetFilePath);
+      }
+
+      const id = 'art-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+      const previewPngPath = path.join(previewsDir, `${id}.png`);
+      const previewRes = await extractAndSave2DPreview(targetFilePath, previewPngPath, nativeImage);
+      const stats = fs.statSync(targetFilePath);
+
+      const softwareType = ext === '.kra' ? 'krita' : (ext === '.psd' || ext === '.psb' ? 'photoshop' : (ext === '.clip' ? 'clipstudio' : (ext === '.svg' ? 'vector' : 'image')));
+
+      const asset = {
+        id,
+        name: baseName,
+        fileName: path.basename(targetFilePath),
+        filePath: targetFilePath,
+        relativePath: path.relative(artDir, targetFilePath).replace(/\\/g, '/'),
+        previewUrl: previewRes.dataUrl || '',
+        previewPath: previewPngPath,
+        fileSize: stats.size,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        category: 'Illustrations',
+        tags: [],
+        notes: '',
+        metadata: previewRes.metadata || inspectArtworkMetadata(targetFilePath),
+        software: softwareType,
+      };
+
+      const assets = loadVaultArtMetadata(artDir);
+      const idx = assets.findIndex((a) => path.normalize(a.filePath).toLowerCase() === path.normalize(targetFilePath).toLowerCase());
+      if (idx >= 0) assets[idx] = asset;
+      else assets.unshift(asset);
+      saveVaultArtMetadata(artDir, assets);
+      imported.push(asset);
+    } catch (err) {
+      console.error('Error importing artwork file:', filePath, err);
+    }
+  }
+
+  return { success: true, assets: imported };
+});
+
+ipcMain.handle('art2d-extract-preview', async (_, assetId) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const previewsDir = path.join(artDir, '.previews');
+    const assets = loadVaultArtMetadata(artDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) {
+      return { success: false, error: 'Artwork not found' };
+    }
+    if (!fs.existsSync(asset.filePath)) {
+      return { success: false, error: 'Artwork file does not exist on disk' };
+    }
+
+    const previewPngPath = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+    const previewRes = await extractAndSave2DPreview(asset.filePath, previewPngPath, nativeImage);
+    if (!previewRes.success) {
+      return { success: false, error: previewRes.error };
+    }
+
+    asset.previewUrl = previewRes.dataUrl;
+    asset.previewPath = previewPngPath;
+    if (previewRes.metadata) {
+      asset.metadata = { ...asset.metadata, ...previewRes.metadata };
+    }
+    asset.updatedAt = new Date().toISOString();
+    saveVaultArtMetadata(artDir, assets);
+
+    return { success: true, asset };
+  } catch (err) {
+    console.error('Error re-extracting artwork preview:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-update', async (_, updatedAsset) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const assets = loadVaultArtMetadata(artDir);
+    const idx = assets.findIndex((a) => a.id === updatedAsset.id);
+    if (idx >= 0) {
+      assets[idx] = {
+        ...assets[idx],
+        ...updatedAsset,
+        updatedAt: new Date().toISOString(),
+      };
+      saveVaultArtMetadata(artDir, assets);
+      return { success: true, asset: assets[idx] };
+    }
+    return { success: false, error: 'Artwork not found' };
+  } catch (err) {
+    console.error('Error updating artwork:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-delete', async (_, { assetId, deleteFile }) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    let assets = loadVaultArtMetadata(artDir);
+    const target = assets.find((a) => a.id === assetId);
+    if (!target) return { success: false, error: 'Artwork not found' };
+
+    if (deleteFile) {
+      if (fs.existsSync(target.filePath)) {
+        try { fs.unlinkSync(target.filePath); } catch (e) {}
+      }
+      if (target.previewPath && fs.existsSync(target.previewPath)) {
+        try { fs.unlinkSync(target.previewPath); } catch (e) {}
+      }
+    }
+
+    assets = assets.filter((a) => a.id !== assetId);
+    saveVaultArtMetadata(artDir, assets);
+    return { success: true };
+  } catch (err) {
+    console.error('Error deleting artwork:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-open-software', async (_, { filePath, preferredSoftware }) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { success: false, error: 'File does not exist: ' + filePath };
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const targetSoftware = preferredSoftware || (ext === '.kra' ? 'krita' : (ext === '.psd' || ext === '.psb' ? 'photoshop' : 'default'));
+
+    if (targetSoftware === 'krita' || ext === '.kra') {
+      const kritaExe = findKritaExecutable();
+      if (kritaExe) {
+        exec(`"${kritaExe}" "${filePath}"`, () => {});
+        return { success: true, software: 'Krita' };
+      }
+    } else if (targetSoftware === 'photoshop' || ext === '.psd' || ext === '.psb') {
+      const psExe = findPhotoshopExecutable();
+      if (psExe) {
+        exec(`"${psExe}" "${filePath}"`, () => {});
+        return { success: true, software: 'Photoshop' };
+      }
+    }
+
+    // Default OS application
+    await shell.openPath(filePath);
+    return { success: true, software: 'Default App' };
+  } catch (err) {
+    console.error('Error opening artwork in software:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-open-folder', async () => {
+  try {
+    const artDir = getVaultArtDirectory();
+    await shell.openPath(artDir);
+    return { success: true, artDir };
+  } catch (err) {
+    console.error('Error opening art folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-copy-clipboard', async (_, assetId) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const previewsDir = path.join(artDir, '.previews');
+    const assets = loadVaultArtMetadata(artDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, error: 'Artwork not found' };
+
+    const imagePath = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+    let targetToCopy = imagePath;
+    if (!fs.existsSync(targetToCopy)) {
+      if (fs.existsSync(asset.filePath) && ['.png', '.jpg', '.jpeg', '.webp', '.bmp'].includes(path.extname(asset.filePath).toLowerCase())) {
+        targetToCopy = asset.filePath;
+      } else {
+        return { success: false, error: 'No renderable image file found for clipboard' };
+      }
+    }
+
+    const img = nativeImage.createFromPath(targetToCopy);
+    if (img.isEmpty()) {
+      return { success: false, error: 'Could not load image into clipboard' };
+    }
+
+    clipboard.writeImage(img);
+    return { success: true };
+  } catch (err) {
+    console.error('Error copying artwork to clipboard:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-export-preview', async (_, assetId) => {
+  if (!mainWindow) return { success: false, error: 'No window' };
+  try {
+    const artDir = getVaultArtDirectory();
+    const previewsDir = path.join(artDir, '.previews');
+    const assets = loadVaultArtMetadata(artDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, error: 'Artwork not found' };
+
+    const previewPath = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+    if (!fs.existsSync(previewPath)) {
+      return { success: false, error: 'Preview image does not exist' };
+    }
+
+    const saveRes = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Artwork Preview as PNG',
+      defaultPath: `${asset.name}_preview.png`,
+      filters: [{ name: 'PNG Image', extensions: ['png'] }],
+    });
+
+    if (saveRes.canceled || !saveRes.filePath) {
+      return { success: false, canceled: true };
+    }
+
+    fs.copyFileSync(previewPath, saveRes.filePath);
+    return { success: true, targetPath: saveRes.filePath };
+  } catch (err) {
+    console.error('Error exporting preview:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-add-to-canvas', async (_, { assetId, canvasPath }) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const assets = loadVaultArtMetadata(artDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, error: 'Artwork not found' };
+
+    const canvasDir = getVaultCanvasDirectory();
+    const targetCanvasFile = canvasPath ? path.join(canvasDir, canvasPath) : null;
+
+    if (!targetCanvasFile || !fs.existsSync(targetCanvasFile)) {
+      return { success: false, error: 'Canvas file not found' };
+    }
+
+    const raw = fs.readFileSync(targetCanvasFile, 'utf8');
+    const canvasData = JSON.parse(raw);
+    if (!Array.isArray(canvasData.nodes)) canvasData.nodes = [];
+
+    // Place node at center or after last node
+    let maxX = 0;
+    let maxY = 0;
+    for (const n of canvasData.nodes) {
+      if (n.x + n.width > maxX) maxX = n.x + n.width;
+      if (n.y > maxY) maxY = n.y;
+    }
+
+    const newNode = {
+      id: 'node-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      type: 'image',
+      x: maxX > 0 ? maxX + 60 : 100,
+      y: maxY > 0 ? maxY : 100,
+      width: Math.min(600, asset.metadata?.width || 500),
+      height: Math.min(600, asset.metadata?.height || 500),
+      src: asset.previewUrl || '',
+      alt: asset.name,
+      fitMode: 'contain',
+    };
+
+    canvasData.nodes.push(newNode);
+    fs.writeFileSync(targetCanvasFile, JSON.stringify(canvasData, null, 2), 'utf8');
+
+    return { success: true, node: newNode };
+  } catch (err) {
+    console.error('Error adding artwork to canvas:', err);
     return { success: false, error: err.message };
   }
 });

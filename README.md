@@ -51,7 +51,26 @@ Albaqros is a local-first desktop productivity application built with **Electron
 
 ---
 
-### 3. 📦 3D Asset Library & Blender Scene Pipeline
+### 3. 🎨 2D Creative Art & Asset Library (Krita, PSD & Image Portfolio)
+- **Portfolio Repository of Digital Artwork**:
+  - Dedicated creative archive for digital paintings, concept art, character sheets, illustrations, sprites, and texture maps.
+  - Drop your **Krita** (`.kra`), **Photoshop** (`.psd`, `.psb`), **Clip Studio Paint** (`.clip`), or standard images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`) straight into Albaqros from Windows Explorer.
+- **Automatic High-Resolution Previews & Metadata Extraction**:
+  - **Krita (`.kra`)**: Instant zero-dependency native zip extraction of internal `preview.png` and `mergedimage.png`.
+  - **Photoshop (`.psd`)**: Native binary parsing of 8BIM image resource blocks (IDs 1036/1033) and JPEG SOI stream scan.
+  - **Raster & Vector**: Automated preview optimization via Electron native image processing.
+  - **Canvas Dimensions & Specs**: Reads true canvas width, height, aspect ratio (`16:9`, `3:4 Portrait`, etc.), resolution category (`4K UHD`, `1080p FHD`), color space (`RGBA`, `CMYK`, `RGB`), bit depth, and file size.
+- **Workflow Tools & Quick Actions**:
+  - **1-Click Launch**: Open artworks directly in Krita, Photoshop, or your system default application.
+  - **Copy Image to Clipboard**: Direct-to-clipboard image copying ready for pasting into Discord, social media, or Canvas boards.
+  - **Export PNG Previews**: Export clean PNG snapshots of `.kra` or `.psd` documents to disk without opening heavyweight painting software.
+  - **Artist Process & Learnings Log**: Store brush settings, palette ideas, technique reflections, and milestone context with each artwork.
+  - **Batch Management**: Multi-select items for batch tagging, category reassignment, or deletion.
+
+---
+
+### 4. 📦 3D Asset Library & Blender Scene Pipeline
+
 - **Dedicated Assets Hub for Completed 3D Models**:
   - Direct cataloging and organization for completed Blender (`.blend`) models, props, characters, vehicles, and modular kits.
 - **Automated Standardized 3/4 Isometric Previews**:

@@ -79,4 +79,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createScene: (assetIds, sceneName) => ipcRenderer.invoke('assets-create-scene', { assetIds, sceneName }),
     generateAppendScript: (filePath) => ipcRenderer.invoke('assets-generate-append-script', filePath),
   },
+  art2d: {
+    listAssets: () => ipcRenderer.invoke('art2d-list'),
+    importAsset: (params) => ipcRenderer.invoke('art2d-import', params),
+    selectAndImportAsset: () => ipcRenderer.invoke('art2d-select-and-import'),
+    extractPreview: (assetId) => ipcRenderer.invoke('art2d-extract-preview', assetId),
+    updateAsset: (asset) => ipcRenderer.invoke('art2d-update', asset),
+    deleteAsset: (assetId, deleteFile) => ipcRenderer.invoke('art2d-delete', { assetId, deleteFile }),
+    openInSoftware: (filePath, preferredSoftware) =>
+      ipcRenderer.invoke('art2d-open-software', { filePath, preferredSoftware }),
+    openFolder: () => ipcRenderer.invoke('art2d-open-folder'),
+    copyToClipboard: (assetId) => ipcRenderer.invoke('art2d-copy-clipboard', assetId),
+    exportPreview: (assetId) => ipcRenderer.invoke('art2d-export-preview', assetId),
+    addToCanvas: (assetId, canvasPath) => ipcRenderer.invoke('art2d-add-to-canvas', { assetId, canvasPath }),
+  },
 });
+

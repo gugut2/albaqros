@@ -18,6 +18,7 @@ import {
   PanelLeftOpen,
   LayoutGrid,
   Box,
+  Palette,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -28,6 +29,7 @@ import { MajorTasksView } from './MajorTasksView';
 import { NotesStudioView } from './NotesStudioView';
 import { CanvasStudioView } from './CanvasStudioView';
 import { AssetsStudioView } from './AssetsStudioView';
+import { Art2DStudioView } from './Art2DStudioView';
 import { DailyRemindersCard } from './DailyRemindersCard';
 import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
@@ -74,7 +76,7 @@ interface MaximizedViewProps {
   onOpenManageReminders?: () => void;
 }
 
-type StudioTab = 'today' | 'major' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
+type StudioTab = 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
 
 export const MaximizedView: React.FC<MaximizedViewProps> = ({
   currentDate,
@@ -267,6 +269,29 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                 {data.majorTasks?.length}
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('art2d')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              backgroundColor: activeTab === 'art2d' ? 'rgba(236, 72, 153, 0.15)' : 'transparent',
+              color: activeTab === 'art2d' ? '#ffffff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'art2d' ? 600 : 500,
+              fontSize: '0.85rem',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Palette size={16} color={activeTab === 'art2d' ? '#ec4899' : 'currentColor'} />
+            2D Art Library
           </button>
 
           <button
@@ -825,6 +850,15 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
               onNavigateToNote={() => {
                 setActiveTab('notes');
               }}
+            />
+          </div>
+        )}
+
+        {activeTab === 'art2d' && (
+          <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+            <Art2DStudioView
+              isStudioSidebarCollapsed={isStudioSidebarCollapsed}
+              onToggleStudioSidebar={toggleStudioSidebar}
             />
           </div>
         )}
