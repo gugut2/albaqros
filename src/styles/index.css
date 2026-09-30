@@ -275,10 +275,30 @@ input:focus, textarea:focus, select:focus {
   list-style-type: disc;
 }
 
+.albaqros-live-editor ul ul {
+  margin: 3px 0 3px 20px;
+  list-style-type: circle;
+}
+
+.albaqros-live-editor ul ul ul {
+  margin: 3px 0 3px 20px;
+  list-style-type: square;
+}
+
 .albaqros-live-editor ol {
   margin: 6px 0 6px 24px;
   padding: 0;
   list-style-type: decimal;
+}
+
+.albaqros-live-editor ol ol {
+  margin: 3px 0 3px 20px;
+  list-style-type: lower-alpha;
+}
+
+.albaqros-live-editor ol ol ol {
+  margin: 3px 0 3px 20px;
+  list-style-type: lower-roman;
 }
 
 .albaqros-live-editor li {

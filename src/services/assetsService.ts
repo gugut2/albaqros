@@ -41,21 +41,21 @@ function saveFallbackAssets(assets: BlenderAsset[]) {
 }
 
 export const AssetsService = {
-  async listAssets(): Promise<{ success: boolean; assets: BlenderAsset[]; modelsDir?: string; error?: string }> {
+  async listAssets(): Promise<{ success: boolean; assets: BlenderAsset[]; modelsDir?: string; folders?: string[]; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.listAssets) {
       try {
         const res = await (window as any).electronAPI.assets.listAssets();
         if (res && res.success) {
-          return { success: true, assets: res.assets || [], modelsDir: res.modelsDir };
+          return { success: true, assets: res.assets || [], modelsDir: res.modelsDir, folders: res.folders || [] };
         }
-        return { success: false, assets: [], error: res?.error };
+        return { success: false, assets: [], folders: [], error: res?.error };
       } catch (err: any) {
         console.error('Error listing assets via Electron:', err);
-        return { success: false, assets: [], error: err.message };
+        return { success: false, assets: [], folders: [], error: err.message };
       }
     }
 
-    return { success: true, assets: getFallbackAssets() };
+    return { success: true, assets: getFallbackAssets(), folders: [] };
   },
 
   async importAsset(params: {
@@ -65,6 +65,7 @@ export const AssetsService = {
     tags?: string[];
     notes?: string;
     copyToVault?: boolean;
+    folder?: string;
   }): Promise<{ success: boolean; asset?: BlenderAsset; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.importAsset) {
       try {
@@ -80,6 +81,7 @@ export const AssetsService = {
       name: params.name || 'Imported Model',
       fileName: 'model.blend',
       filePath: params.sourceFilePath,
+      folder: params.folder || '',
       fileSize: 1024 * 1024,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -98,10 +100,10 @@ export const AssetsService = {
     return { success: true, asset: newAsset };
   },
 
-  async selectAndImportAsset(): Promise<{ success: boolean; assets?: BlenderAsset[]; canceled?: boolean; error?: string }> {
+  async selectAndImportAsset(params?: { folder?: string }): Promise<{ success: boolean; assets?: BlenderAsset[]; canceled?: boolean; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.selectAndImportAsset) {
       try {
-        return await (window as any).electronAPI.assets.selectAndImportAsset();
+        return await (window as any).electronAPI.assets.selectAndImportAsset(params);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
@@ -168,16 +170,59 @@ export const AssetsService = {
     return { success: false, error: 'Opening Blender requires Electron desktop app.' };
   },
 
-  async openAssetsFolder(): Promise<{ success: boolean; modelsDir?: string; error?: string }> {
+  async openAssetsFolder(subfolder?: string): Promise<{ success: boolean; modelsDir?: string; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.openAssetsFolder) {
       try {
-        return await (window as any).electronAPI.assets.openAssetsFolder();
+        return await (window as any).electronAPI.assets.openAssetsFolder(subfolder);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
     }
 
     return { success: false, error: 'Opening folder requires Electron desktop app.' };
+  },
+
+  async createFolder(folderPath: string): Promise<{ success: boolean; folder?: string; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.createFolder) {
+      try {
+        return await (window as any).electronAPI.assets.createFolder(folderPath);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    return { success: true, folder: folderPath };
+  },
+
+  async moveAsset(assetId: string, targetFolder: string): Promise<{ success: boolean; asset?: BlenderAsset; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.moveAsset) {
+      try {
+        return await (window as any).electronAPI.assets.moveAsset(assetId, targetFolder);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    const assets = getFallbackAssets();
+    const idx = assets.findIndex((a) => a.id === assetId);
+    if (idx >= 0) {
+      assets[idx].folder = targetFolder;
+      saveFallbackAssets(assets);
+      return { success: true, asset: assets[idx] };
+    }
+    return { success: false, error: 'Asset not found' };
+  },
+
+  async deleteFolder(folderPath: string): Promise<{ success: boolean; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.deleteFolder) {
+      try {
+        return await (window as any).electronAPI.assets.deleteFolder(folderPath);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    return { success: true };
   },
 
   async createScene(assetIds: string[], sceneName?: string): Promise<{ success: boolean; scenePath?: string; error?: string }> {

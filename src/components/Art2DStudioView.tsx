@@ -29,6 +29,9 @@ import {
   SlidersHorizontal,
   FileImage,
   Brush,
+  Folder,
+  FolderPlus,
+  Move,
 } from 'lucide-react';
 import { Art2DAsset, Art2DSoftware } from '../types';
 import { Art2dService } from '../services/art2dService';
@@ -107,11 +110,20 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState<boolean>(false);
 
+  // Folder management state
+  const [folders, setFolders] = useState<string[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null); // null = All, "" = Root/Unsorted, or "Folder"
+  const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState<boolean>(false);
+  const [newFolderName, setNewFolderName] = useState<string>('');
+  const [isBatchMoveModalOpen, setIsBatchMoveModalOpen] = useState<boolean>(false);
+  const [batchTargetFolder, setBatchTargetFolder] = useState<string>('');
+
   // Detail edit fields
   const [editName, setEditName] = useState<string>('');
   const [editCategory, setEditCategory] = useState<string>('Illustrations');
   const [editTags, setEditTags] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
+  const [editFolder, setEditFolder] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Batch edit state
@@ -124,6 +136,12 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
       const res = await Art2dService.listAssets();
       if (res.success) {
         setAssets(res.assets || []);
+        const diskFolders = res.folders || [];
+        const assetFolders = (res.assets || [])
+          .map((a) => a.folder)
+          .filter((f): f is string => Boolean(f && f.trim()));
+        const unique = Array.from(new Set([...diskFolders, ...assetFolders])).sort();
+        setFolders(unique);
       }
     } catch (err) {
       console.error('Failed to load 2D art assets:', err);
@@ -144,9 +162,11 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
   // Import handler via file picker dialog
   const handleImportClick = async () => {
     try {
-      const res = await Art2dService.selectAndImportAsset();
+      const targetFolder = selectedFolder && selectedFolder !== '' ? selectedFolder : undefined;
+      const res = await Art2dService.selectAndImportAsset({ folder: targetFolder });
       if (res.success && res.assets && res.assets.length > 0) {
-        showNotice(`Imported ${res.assets.length} artwork(s) with full preview extraction!`);
+        const dest = targetFolder ? ` into "${targetFolder}"` : '';
+        showNotice(`Imported ${res.assets.length} artwork(s)${dest} with full preview extraction!`);
         await loadAssets();
       }
     } catch (err: any) {
@@ -163,6 +183,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
     const files = Array.from(e.dataTransfer.files);
     let importedCount = 0;
     const supportedExts = ['.kra', '.psd', '.psb', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.clip', '.bmp', '.gif', '.tiff'];
+    const targetFolder = selectedFolder && selectedFolder !== '' ? selectedFolder : undefined;
 
     showNotice(`Importing & rendering previews for ${files.length} file(s)...`);
 
@@ -175,6 +196,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
             sourceFilePath: pathOnDisk,
             name: file.name.replace(/\.[^/.]+$/, ''),
             category: selectedCategory !== 'All' ? selectedCategory : 'Illustrations',
+            folder: targetFolder,
             copyToVault: true,
           });
           if (res.success) importedCount++;
@@ -183,10 +205,86 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
     }
 
     if (importedCount > 0) {
-      showNotice(`Successfully added ${importedCount} artwork(s) to your 2D library!`);
+      const dest = targetFolder ? ` into "${targetFolder}"` : '';
+      showNotice(`Successfully added ${importedCount} artwork(s)${dest} to your 2D library!`);
       await loadAssets();
     } else {
       showNotice('No supported creative files found in dropped items.');
+    }
+  };
+
+  // Folder creation handler
+  const handleCreateFolder = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newFolderName.trim().replace(/[\\:*?"<>|]/g, '');
+    if (!clean) {
+      showNotice('Please enter a valid folder name');
+      return;
+    }
+    try {
+      const res = await Art2dService.createFolder(clean);
+      if (res.success && res.folder) {
+        showNotice(`Created folder "${res.folder}"`);
+        setNewFolderName('');
+        setIsNewFolderModalOpen(false);
+        await loadAssets();
+        setSelectedFolder(res.folder);
+      } else {
+        showNotice('Failed to create folder: ' + (res.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      showNotice('Error creating folder: ' + err.message);
+    }
+  };
+
+  // Delete current selected folder
+  const handleDeleteCurrentFolder = async () => {
+    if (!selectedFolder) return;
+    const itemsInFolder = assets.filter((a) => a.folder === selectedFolder || a.folder?.startsWith(selectedFolder + '/')).length;
+    const msg = itemsInFolder > 0
+      ? `Are you sure you want to delete folder "${selectedFolder}" and all ${itemsInFolder} artwork(s) inside it from disk?`
+      : `Delete empty folder "${selectedFolder}"?`;
+    if (!window.confirm(msg)) return;
+
+    try {
+      const res = await Art2dService.deleteFolder(selectedFolder);
+      if (res.success) {
+        showNotice(`Folder "${selectedFolder}" deleted`);
+        setSelectedFolder(null);
+        await loadAssets();
+      } else {
+        showNotice('Failed to delete folder: ' + (res.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      showNotice('Error deleting folder: ' + err.message);
+    }
+  };
+
+  // Open folder in explorer
+  const handleOpenCurrentFolderInExplorer = async () => {
+    try {
+      await Art2dService.openArtFolder(selectedFolder || undefined);
+      showNotice(`Opened ${selectedFolder ? `"${selectedFolder}"` : '2D Art vault'} in Windows Explorer`);
+    } catch (err: any) {
+      showNotice('Error opening folder: ' + err.message);
+    }
+  };
+
+  // Batch move handler
+  const handleBatchMove = async () => {
+    if (selectedAssetIds.length === 0) return;
+    try {
+      let movedCount = 0;
+      for (const id of selectedAssetIds) {
+        const res = await Art2dService.moveAsset(id, batchTargetFolder);
+        if (res.success) movedCount++;
+      }
+      showNotice(`Moved ${movedCount} artwork(s) to ${batchTargetFolder ? `"${batchTargetFolder}"` : 'Root / Unsorted'}`);
+      setIsBatchMoveModalOpen(false);
+      setSelectedAssetIds([]);
+      await loadAssets();
+    } catch (err: any) {
+      showNotice('Error moving artworks: ' + err.message);
     }
   };
 
@@ -261,6 +359,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
     setEditCategory(asset.category || 'Illustrations');
     setEditTags(asset.tags?.join(', ') || '');
     setEditNotes(asset.notes || '');
+    setEditFolder(asset.folder || '');
   };
 
   // Save detail edits
@@ -274,19 +373,29 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
         .filter(Boolean)
         .map((t) => (t.startsWith('#') ? t : `#${t}`));
 
+      let currentAsset = detailAsset;
+      if (editFolder !== (detailAsset.folder || '')) {
+        const moveRes = await Art2dService.moveAsset(detailAsset.id, editFolder);
+        if (moveRes.success && moveRes.asset) {
+          currentAsset = moveRes.asset;
+        }
+      }
+
       const updated: Art2DAsset = {
-        ...detailAsset,
-        name: editName.trim() || detailAsset.name,
+        ...currentAsset,
+        name: editName.trim() || currentAsset.name,
         category: editCategory,
         tags: parsedTags,
         notes: editNotes,
+        folder: editFolder,
       };
 
       const res = await Art2dService.updateAsset(updated);
       if (res.success && res.asset) {
         setAssets((prev) => prev.map((a) => (a.id === updated.id ? res.asset! : a)));
         setDetailAsset(res.asset);
-        showNotice('Artwork details saved');
+        showNotice('Artwork details and folder location saved');
+        await loadAssets();
       }
     } catch (err: any) {
       showNotice('Failed to save: ' + err.message);
@@ -408,7 +517,12 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
         (softwareFilter === 'vector' && asset.fileName.toLowerCase().endsWith('.svg')) ||
         (softwareFilter === 'image' && ['.png', '.jpg', '.jpeg', '.webp'].some((e) => asset.fileName.toLowerCase().endsWith(e)));
 
-      return matchesSearch && matchesCat && matchesSoftware;
+      const matchesFolder =
+        selectedFolder === null ||
+        (selectedFolder === '' && (!asset.folder || asset.folder === '')) ||
+        (selectedFolder !== null && selectedFolder !== '' && (asset.folder === selectedFolder || asset.folder?.startsWith(selectedFolder + '/')));
+
+      return matchesSearch && matchesCat && matchesSoftware && matchesFolder;
     });
 
     list.sort((a, b) => {
@@ -425,7 +539,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
     });
 
     return list;
-  }, [assets, searchQuery, selectedCategory, softwareFilter, sortBy]);
+  }, [assets, searchQuery, selectedCategory, softwareFilter, selectedFolder, sortBy]);
 
   // Total stats
   const stats = useMemo(() => {
@@ -965,6 +1079,225 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
           </div>
         </div>
 
+        {/* Folders Navigation Strip */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingRight: '4px' }}>
+            <Folder size={13} color="#ec4899" />
+            <span>Folders:</span>
+          </div>
+
+          {/* All Folders */}
+          <button
+            type="button"
+            onClick={() => setSelectedFolder(null)}
+            style={{
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              fontWeight: selectedFolder === null ? 700 : 500,
+              border: '1px solid',
+              borderColor: selectedFolder === null ? '#ec4899' : 'rgba(255,255,255,0.08)',
+              backgroundColor: selectedFolder === null ? 'rgba(236, 72, 153, 0.22)' : 'rgba(255,255,255,0.02)',
+              color: selectedFolder === null ? '#ffffff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span>All Folders</span>
+            <span style={{ fontSize: '0.675rem', opacity: 0.7 }}>({assets.length})</span>
+          </button>
+
+          {/* Root / Unsorted */}
+          {(() => {
+            const rootCount = assets.filter((a) => !a.folder || a.folder === '').length;
+            return (
+              <button
+                type="button"
+                onClick={() => setSelectedFolder('')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: selectedFolder === '' ? 700 : 500,
+                  border: '1px solid',
+                  borderColor: selectedFolder === '' ? '#ec4899' : 'rgba(255,255,255,0.08)',
+                  backgroundColor: selectedFolder === '' ? 'rgba(236, 72, 153, 0.22)' : 'rgba(255,255,255,0.02)',
+                  color: selectedFolder === '' ? '#ffffff' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>Root / Unsorted</span>
+                <span style={{ fontSize: '0.675rem', opacity: 0.7 }}>({rootCount})</span>
+              </button>
+            );
+          })()}
+
+          {/* Custom Folders */}
+          {folders.map((f) => {
+            const count = assets.filter((a) => a.folder === f || a.folder?.startsWith(f + '/')).length;
+            const isSelected = selectedFolder === f;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setSelectedFolder(isSelected ? null : f)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: isSelected ? 700 : 500,
+                  border: '1px solid',
+                  borderColor: isSelected ? '#ec4899' : 'rgba(255,255,255,0.08)',
+                  backgroundColor: isSelected ? 'rgba(236, 72, 153, 0.25)' : 'rgba(255,255,255,0.02)',
+                  color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Folder size={12} color={isSelected ? '#f472b6' : '#94a3b8'} />
+                <span>{f}</span>
+                <span style={{ fontSize: '0.675rem', opacity: 0.75 }}>({count})</span>
+              </button>
+            );
+          })}
+
+          {/* New Folder Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setNewFolderName('');
+              setIsNewFolderModalOpen(true);
+            }}
+            title="Create new folder in 2D art vault"
+            style={{
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              border: '1px dashed rgba(236, 72, 153, 0.5)',
+              backgroundColor: 'rgba(236, 72, 153, 0.08)',
+              color: '#f472b6',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <FolderPlus size={13} />
+            <span>New Folder</span>
+          </button>
+        </div>
+
+        {/* Selected Folder Active Indicator & Action Strip */}
+        {selectedFolder !== null && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(236, 72, 153, 0.1)',
+              border: '1px solid rgba(236, 72, 153, 0.25)',
+              fontSize: '0.775rem',
+              color: '#fbcfe8',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Folder size={14} color="#f472b6" />
+              <span>
+                Active Folder:{' '}
+                <strong style={{ color: '#ffffff' }}>
+                  {selectedFolder === '' ? 'Root / Unsorted' : selectedFolder}
+                </strong>
+                {' '}({filteredAssets.length} artwork{filteredAssets.length === 1 ? '' : 's'})
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.725rem' }}>
+                • New imports will save here
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={handleOpenCurrentFolderInExplorer}
+                title="Open this folder in Windows Explorer"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#f472b6',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.725rem',
+                  fontWeight: 600,
+                  textDecoration: 'underline',
+                  padding: 0,
+                }}
+              >
+                <FolderOpen size={12} />
+                Open in Explorer
+              </button>
+
+              {selectedFolder !== '' && (
+                <button
+                  type="button"
+                  onClick={handleDeleteCurrentFolder}
+                  title="Delete this folder from disk"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#f87171',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.725rem',
+                    fontWeight: 600,
+                    padding: 0,
+                  }}
+                >
+                  <Trash2 size={12} />
+                  Delete Folder
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setSelectedFolder(null)}
+                title="Clear folder filter (Show all)"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: 0,
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Category Filter Pills Bar */}
         <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
           {CATEGORIES.map((cat) => {
@@ -1056,6 +1389,19 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
           </div>
 
           <div style={{ height: '20px', width: '1px', backgroundColor: 'var(--border-subtle)' }} />
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setBatchTargetFolder(selectedFolder || '');
+              setIsBatchMoveModalOpen(true);
+            }}
+            style={{ fontSize: '0.775rem', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: '5px' }}
+          >
+            <Move size={13} />
+            Move to Folder
+          </button>
 
           <button
             type="button"
@@ -1880,6 +2226,59 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
                 </select>
               </div>
 
+              {/* Folder Selector */}
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                  Vault Folder / Location
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select
+                    value={editFolder}
+                    onChange={(e) => setEditFolder(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      backgroundColor: 'rgba(255,255,255,0.04)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      color: '#ffffff',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">📁 Root / Unsorted</option>
+                    {folders.map((f) => (
+                      <option key={f} value={f}>
+                        📁 {f}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const name = window.prompt('Enter new folder name:');
+                      if (name && name.trim()) {
+                        const clean = name.trim().replace(/[\\:*?"<>|]/g, '');
+                        Art2dService.createFolder(clean).then((res) => {
+                          if (res.success && res.folder) {
+                            loadAssets();
+                            setEditFolder(res.folder);
+                            showNotice(`Created folder "${res.folder}"`);
+                          }
+                        });
+                      }
+                    }}
+                    title="Create new folder"
+                    style={{ padding: '0 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <FolderPlus size={14} />
+                    <span>New</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Tags Input */}
               <div>
                 <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
@@ -2126,6 +2525,203 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
                 style={{ background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', border: 'none' }}
               >
                 Apply Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Folder Modal */}
+      {isNewFolderModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => setIsNewFolderModalOpen(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '420px',
+              backgroundColor: '#1f2430',
+              borderRadius: '12px',
+              border: '1px solid #ec4899',
+              padding: '22px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.8)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(236, 72, 153, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#f472b6',
+                }}
+              >
+                <FolderPlus size={20} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                  Create New Folder
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                  Organize your 2D artworks into categorized subfolders
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleCreateFolder}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                  Folder Name
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="e.g. Characters, Environments, Studies"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-subtle)',
+                    color: '#ffffff',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsNewFolderModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', border: 'none' }}
+                >
+                  Create Folder
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Move Modal */}
+      {isBatchMoveModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => setIsBatchMoveModalOpen(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '440px',
+              backgroundColor: '#1f2430',
+              borderRadius: '12px',
+              border: '1px solid var(--accent-indigo)',
+              padding: '22px',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.8)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#818cf8',
+                }}
+              >
+                <Move size={18} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#ffffff', margin: 0 }}>
+                  Move {selectedAssetIds.length} Artwork{selectedAssetIds.length === 1 ? '' : 's'}
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                  Choose destination folder in vault
+                </p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Target Folder
+              </label>
+              <select
+                value={batchTargetFolder}
+                onChange={(e) => setBatchTargetFolder(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '8px',
+                  color: '#ffffff',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                }}
+              >
+                <option value="">📁 Root / Unsorted</option>
+                {folders.map((f) => (
+                  <option key={f} value={f}>
+                    📁 {f}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsBatchMoveModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleBatchMove}
+                style={{ background: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', border: 'none' }}
+              >
+                Move Artworks
               </button>
             </div>
           </div>

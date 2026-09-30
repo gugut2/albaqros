@@ -1641,6 +1641,27 @@ function saveVaultAssetsMetadata(modelsDir, assets) {
   }
 }
 
+function getVaultSubfolders(baseDir) {
+  const folders = [];
+  function walk(current) {
+    if (!fs.existsSync(current)) return;
+    try {
+      const entries = fs.readdirSync(current, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue; // ignore .previews or hidden
+        if (entry.isDirectory()) {
+          const full = path.join(current, entry.name);
+          const rel = path.relative(baseDir, full).replace(/\\/g, '/');
+          folders.push(rel);
+          walk(full);
+        }
+      }
+    } catch (e) {}
+  }
+  walk(baseDir);
+  return folders.sort();
+}
+
 ipcMain.handle('assets-list', async () => {
   try {
     const modelsDir = getVaultModelsDirectory();
@@ -1680,6 +1701,7 @@ ipcMain.handle('assets-list', async () => {
         const ext = path.extname(diskPath);
         const baseName = path.basename(diskPath, ext);
         const relPath = path.relative(modelsDir, diskPath).replace(/\\/g, '/');
+        const folder = path.dirname(relPath) === '.' ? '' : path.dirname(relPath).replace(/\\/g, '/');
         const stats = fs.statSync(diskPath);
         const id = 'asset-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
         const previewFileName = `${id}.png`;
@@ -1691,6 +1713,7 @@ ipcMain.handle('assets-list', async () => {
           fileName: path.basename(diskPath),
           filePath: diskPath,
           relativePath: relPath,
+          folder,
           previewPath,
           previewUrl: '',
           fileSize: stats.size,
@@ -1707,11 +1730,21 @@ ipcMain.handle('assets-list', async () => {
       }
     }
 
-    // Populate previewUrl (base64 data URL) for all assets
+    // Populate previewUrl (base64 data URL) and verify folder/relativePath for all assets
     for (const asset of assets) {
       if (!fs.existsSync(asset.filePath)) {
         continue;
       }
+
+      // Keep folder & relativePath in sync with disk
+      const currentRel = path.relative(modelsDir, asset.filePath).replace(/\\/g, '/');
+      const currentFolder = path.dirname(currentRel) === '.' ? '' : path.dirname(currentRel).replace(/\\/g, '/');
+      if (asset.folder !== currentFolder || asset.relativePath !== currentRel) {
+        asset.folder = currentFolder;
+        asset.relativePath = currentRel;
+        hasChanges = true;
+      }
+
       const previewFile = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
       asset.previewPath = previewFile;
 
@@ -1741,14 +1774,15 @@ ipcMain.handle('assets-list', async () => {
       saveVaultAssetsMetadata(modelsDir, assets);
     }
 
-    return { success: true, assets, modelsDir };
+    const folders = getVaultSubfolders(modelsDir);
+    return { success: true, assets, modelsDir, folders };
   } catch (err) {
     console.error('Error listing assets:', err);
-    return { success: false, error: err.message, assets: [] };
+    return { success: false, error: err.message, assets: [], folders: [] };
   }
 });
 
-ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault }) => {
+ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault, folder }) => {
   try {
     if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
       return { success: false, error: 'Source file does not exist' };
@@ -1759,16 +1793,22 @@ ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags
     const ext = path.extname(sourceFilePath).toLowerCase();
     const baseName = (name || path.basename(sourceFilePath, ext)).replace(/[\\/:*?"<>|]/g, '').trim();
 
+    const cleanFolder = (folder || '').replace(/[\\:*?"<>|]/g, '').trim();
+    const targetDir = cleanFolder ? path.join(modelsDir, cleanFolder) : modelsDir;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
     let targetFilePath = sourceFilePath;
     const shouldCopy = copyToVault !== false;
 
     if (shouldCopy) {
       let finalFileName = `${baseName}${ext}`;
-      targetFilePath = path.join(modelsDir, finalFileName);
+      targetFilePath = path.join(targetDir, finalFileName);
       let counter = 1;
       while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
         finalFileName = `${baseName} (${counter})${ext}`;
-        targetFilePath = path.join(modelsDir, finalFileName);
+        targetFilePath = path.join(targetDir, finalFileName);
         counter++;
       }
       if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
@@ -1796,6 +1836,7 @@ ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags
       fileName: path.basename(targetFilePath),
       filePath: targetFilePath,
       relativePath: path.relative(modelsDir, targetFilePath).replace(/\\/g, '/'),
+      folder: cleanFolder,
       previewUrl: dataUrl,
       previewPath: previewPngPath,
       fileSize: stats.size,
@@ -1823,7 +1864,7 @@ ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags
   }
 });
 
-ipcMain.handle('assets-select-and-import', async () => {
+ipcMain.handle('assets-select-and-import', async (_, { folder } = {}) => {
   if (!mainWindow) return { success: false, error: 'No window' };
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Completed Blender Model',
@@ -1839,17 +1880,23 @@ ipcMain.handle('assets-select-and-import', async () => {
     return { success: false, canceled: true };
   }
 
+  const modelsDir = getVaultModelsDirectory();
+  const previewsDir = path.join(modelsDir, '.previews');
+  const cleanFolder = (folder || '').replace(/[\\:*?"<>|]/g, '').trim();
+  const targetDir = cleanFolder ? path.join(modelsDir, cleanFolder) : modelsDir;
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
   const imported = [];
   for (const filePath of result.filePaths) {
     try {
-      const modelsDir = getVaultModelsDirectory();
-      const previewsDir = path.join(modelsDir, '.previews');
       const ext = path.extname(filePath);
       const baseName = path.basename(filePath, ext);
-      let targetFilePath = path.join(modelsDir, `${baseName}${ext}`);
+      let targetFilePath = path.join(targetDir, `${baseName}${ext}`);
       let counter = 1;
       while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
-        targetFilePath = path.join(modelsDir, `${baseName} (${counter})${ext}`);
+        targetFilePath = path.join(targetDir, `${baseName} (${counter})${ext}`);
         counter++;
       }
       if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
@@ -1876,6 +1923,7 @@ ipcMain.handle('assets-select-and-import', async () => {
         fileName: path.basename(targetFilePath),
         filePath: targetFilePath,
         relativePath: path.relative(modelsDir, targetFilePath).replace(/\\/g, '/'),
+        folder: cleanFolder,
         previewUrl: dataUrl,
         previewPath: previewPngPath,
         fileSize: stats.size,
@@ -1981,6 +2029,89 @@ ipcMain.handle('assets-delete', async (_, { assetId, deleteFile }) => {
   }
 });
 
+ipcMain.handle('assets-create-folder', async (_, folderPath) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const cleanPath = (folderPath || '').replace(/[\\:*?"<>|]/g, '').trim();
+    if (!cleanPath) return { success: false, error: 'Invalid folder name' };
+    const safePath = path.normalize(path.join(modelsDir, cleanPath));
+    if (!safePath.toLowerCase().startsWith(modelsDir.toLowerCase())) {
+      return { success: false, error: 'Access denied' };
+    }
+    if (!fs.existsSync(safePath)) {
+      fs.mkdirSync(safePath, { recursive: true });
+    }
+    const rel = path.relative(modelsDir, safePath).replace(/\\/g, '/');
+    return { success: true, folder: rel };
+  } catch (err) {
+    console.error('Error creating 3D models folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-move', async (_, { assetId, targetFolder }) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, error: 'Asset not found' };
+    if (!fs.existsSync(asset.filePath)) return { success: false, error: 'File does not exist on disk' };
+
+    const cleanFolder = (targetFolder || '').replace(/[\\:*?"<>|]/g, '').trim();
+    const destDir = cleanFolder ? path.join(modelsDir, cleanFolder) : modelsDir;
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+
+    const fileName = path.basename(asset.filePath);
+    let targetPath = path.join(destDir, fileName);
+    if (path.normalize(targetPath).toLowerCase() !== path.normalize(asset.filePath).toLowerCase()) {
+      let counter = 1;
+      const ext = path.extname(fileName);
+      const base = path.basename(fileName, ext);
+      while (fs.existsSync(targetPath)) {
+        targetPath = path.join(destDir, `${base} (${counter})${ext}`);
+        counter++;
+      }
+      fs.renameSync(asset.filePath, targetPath);
+    }
+
+    asset.filePath = targetPath;
+    asset.fileName = path.basename(targetPath);
+    asset.relativePath = path.relative(modelsDir, targetPath).replace(/\\/g, '/');
+    asset.folder = cleanFolder;
+    asset.updatedAt = new Date().toISOString();
+
+    saveVaultAssetsMetadata(modelsDir, assets);
+    return { success: true, asset };
+  } catch (err) {
+    console.error('Error moving 3D asset:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('assets-delete-folder', async (_, folderPath) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const cleanFolder = (folderPath || '').trim();
+    if (!cleanFolder) return { success: false, error: 'Cannot delete root directory' };
+    const safePath = path.normalize(path.join(modelsDir, cleanFolder));
+    if (!safePath.toLowerCase().startsWith(modelsDir.toLowerCase()) || safePath.toLowerCase() === modelsDir.toLowerCase()) {
+      return { success: false, error: 'Access denied' };
+    }
+    if (fs.existsSync(safePath)) {
+      fs.rmSync(safePath, { recursive: true, force: true });
+      let assets = loadVaultAssetsMetadata(modelsDir);
+      assets = assets.filter((a) => !path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
+      saveVaultAssetsMetadata(modelsDir, assets);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error('Error deleting 3D models folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('assets-open-in-blender', async (_, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -2000,11 +2131,12 @@ ipcMain.handle('assets-open-in-blender', async (_, filePath) => {
   }
 });
 
-ipcMain.handle('assets-open-folder', async () => {
+ipcMain.handle('assets-open-folder', async (_, subfolder) => {
   try {
     const modelsDir = getVaultModelsDirectory();
-    await shell.openPath(modelsDir);
-    return { success: true, modelsDir };
+    const target = subfolder ? path.join(modelsDir, subfolder) : modelsDir;
+    await shell.openPath(target);
+    return { success: true, modelsDir: target };
   } catch (err) {
     console.error('Error opening models folder:', err);
     return { success: false, error: err.message };
@@ -2053,6 +2185,7 @@ print("Successfully imported objects from " + asset_path)
     return { success: false, error: err.message };
   }
 });
+
 
 // ==========================================
 // Vault 2D Creative Art & Asset System IPCs
@@ -2138,6 +2271,7 @@ ipcMain.handle('art2d-list', async () => {
         const ext = path.extname(diskPath).toLowerCase();
         const baseName = path.basename(diskPath, ext);
         const relPath = path.relative(artDir, diskPath).replace(/\\/g, '/');
+        const folder = path.dirname(relPath) === '.' ? '' : path.dirname(relPath).replace(/\\/g, '/');
         const stats = fs.statSync(diskPath);
         const id = 'art-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
         const previewFileName = `${id}.png`;
@@ -2149,6 +2283,7 @@ ipcMain.handle('art2d-list', async () => {
           fileName: path.basename(diskPath),
           filePath: diskPath,
           relativePath: relPath,
+          folder,
           previewPath,
           previewUrl: '',
           fileSize: stats.size,
@@ -2166,11 +2301,21 @@ ipcMain.handle('art2d-list', async () => {
       }
     }
 
-    // Populate previewUrl (base64 data URL) and verify thumbnail files on disk
+    // Populate previewUrl (base64 data URL) and verify folder/relativePath for all assets
     for (const asset of assets) {
       if (!fs.existsSync(asset.filePath)) {
         continue;
       }
+
+      // Keep folder & relativePath in sync with disk
+      const currentRel = path.relative(artDir, asset.filePath).replace(/\\/g, '/');
+      const currentFolder = path.dirname(currentRel) === '.' ? '' : path.dirname(currentRel).replace(/\\/g, '/');
+      if (asset.folder !== currentFolder || asset.relativePath !== currentRel) {
+        asset.folder = currentFolder;
+        asset.relativePath = currentRel;
+        hasChanges = true;
+      }
+
       const previewFile = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
       asset.previewPath = previewFile;
 
@@ -2200,14 +2345,15 @@ ipcMain.handle('art2d-list', async () => {
       saveVaultArtMetadata(artDir, assets);
     }
 
-    return { success: true, assets, artDir };
+    const folders = getVaultSubfolders(artDir);
+    return { success: true, assets, artDir, folders };
   } catch (err) {
     console.error('Error listing 2D art assets:', err);
-    return { success: false, error: err.message, assets: [] };
+    return { success: false, error: err.message, assets: [], folders: [] };
   }
 });
 
-ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault }) => {
+ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags, notes, copyToVault, folder }) => {
   try {
     if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
       return { success: false, error: 'Source file does not exist' };
@@ -2218,16 +2364,22 @@ ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags,
     const ext = path.extname(sourceFilePath).toLowerCase();
     const baseName = (name || path.basename(sourceFilePath, ext)).replace(/[\\/:*?"<>|]/g, '').trim();
 
+    const cleanFolder = (folder || '').replace(/[\\:*?"<>|]/g, '').trim();
+    const targetDir = cleanFolder ? path.join(artDir, cleanFolder) : artDir;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
     let targetFilePath = sourceFilePath;
     const shouldCopy = copyToVault !== false;
 
     if (shouldCopy) {
       let finalFileName = `${baseName}${ext}`;
-      targetFilePath = path.join(artDir, finalFileName);
+      targetFilePath = path.join(targetDir, finalFileName);
       let counter = 1;
       while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
         finalFileName = `${baseName} (${counter})${ext}`;
-        targetFilePath = path.join(artDir, finalFileName);
+        targetFilePath = path.join(targetDir, finalFileName);
         counter++;
       }
       if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(sourceFilePath).toLowerCase()) {
@@ -2249,6 +2401,7 @@ ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags,
       fileName: path.basename(targetFilePath),
       filePath: targetFilePath,
       relativePath: path.relative(artDir, targetFilePath).replace(/\\/g, '/'),
+      folder: cleanFolder,
       previewUrl: previewRes.dataUrl || '',
       previewPath: previewPngPath,
       fileSize: stats.size,
@@ -2277,7 +2430,7 @@ ipcMain.handle('art2d-import', async (_, { sourceFilePath, name, category, tags,
   }
 });
 
-ipcMain.handle('art2d-select-and-import', async () => {
+ipcMain.handle('art2d-select-and-import', async (_, { folder } = {}) => {
   if (!mainWindow) return { success: false, error: 'No window' };
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Artwork or Project Files to Add to Library',
@@ -2300,16 +2453,22 @@ ipcMain.handle('art2d-select-and-import', async () => {
 
   const artDir = getVaultArtDirectory();
   const previewsDir = path.join(artDir, '.previews');
+  const cleanFolder = (folder || '').replace(/[\\:*?"<>|]/g, '').trim();
+  const targetDir = cleanFolder ? path.join(artDir, cleanFolder) : artDir;
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
   const imported = [];
 
   for (const filePath of result.filePaths) {
     try {
       const ext = path.extname(filePath).toLowerCase();
       const baseName = path.basename(filePath, ext);
-      let targetFilePath = path.join(artDir, `${baseName}${ext}`);
+      let targetFilePath = path.join(targetDir, `${baseName}${ext}`);
       let counter = 1;
       while (fs.existsSync(targetFilePath) && path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
-        targetFilePath = path.join(artDir, `${baseName} (${counter})${ext}`);
+        targetFilePath = path.join(targetDir, `${baseName} (${counter})${ext}`);
         counter++;
       }
       if (path.normalize(targetFilePath).toLowerCase() !== path.normalize(filePath).toLowerCase()) {
@@ -2329,6 +2488,7 @@ ipcMain.handle('art2d-select-and-import', async () => {
         fileName: path.basename(targetFilePath),
         filePath: targetFilePath,
         relativePath: path.relative(artDir, targetFilePath).replace(/\\/g, '/'),
+        folder: cleanFolder,
         previewUrl: previewRes.dataUrl || '',
         previewPath: previewPngPath,
         fileSize: stats.size,
@@ -2435,6 +2595,89 @@ ipcMain.handle('art2d-delete', async (_, { assetId, deleteFile }) => {
   }
 });
 
+ipcMain.handle('art2d-create-folder', async (_, folderPath) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const cleanPath = (folderPath || '').replace(/[\\:*?"<>|]/g, '').trim();
+    if (!cleanPath) return { success: false, error: 'Invalid folder name' };
+    const safePath = path.normalize(path.join(artDir, cleanPath));
+    if (!safePath.toLowerCase().startsWith(artDir.toLowerCase())) {
+      return { success: false, error: 'Access denied' };
+    }
+    if (!fs.existsSync(safePath)) {
+      fs.mkdirSync(safePath, { recursive: true });
+    }
+    const rel = path.relative(artDir, safePath).replace(/\\/g, '/');
+    return { success: true, folder: rel };
+  } catch (err) {
+    console.error('Error creating 2D art folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-move', async (_, { assetId, targetFolder }) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const assets = loadVaultArtMetadata(artDir);
+    const asset = assets.find((a) => a.id === assetId);
+    if (!asset) return { success: false, error: 'Artwork not found' };
+    if (!fs.existsSync(asset.filePath)) return { success: false, error: 'File does not exist on disk' };
+
+    const cleanFolder = (targetFolder || '').replace(/[\\:*?"<>|]/g, '').trim();
+    const destDir = cleanFolder ? path.join(artDir, cleanFolder) : artDir;
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+
+    const fileName = path.basename(asset.filePath);
+    let targetPath = path.join(destDir, fileName);
+    if (path.normalize(targetPath).toLowerCase() !== path.normalize(asset.filePath).toLowerCase()) {
+      let counter = 1;
+      const ext = path.extname(fileName);
+      const base = path.basename(fileName, ext);
+      while (fs.existsSync(targetPath)) {
+        targetPath = path.join(destDir, `${base} (${counter})${ext}`);
+        counter++;
+      }
+      fs.renameSync(asset.filePath, targetPath);
+    }
+
+    asset.filePath = targetPath;
+    asset.fileName = path.basename(targetPath);
+    asset.relativePath = path.relative(artDir, targetPath).replace(/\\/g, '/');
+    asset.folder = cleanFolder;
+    asset.updatedAt = new Date().toISOString();
+
+    saveVaultArtMetadata(artDir, assets);
+    return { success: true, asset };
+  } catch (err) {
+    console.error('Error moving 2D artwork:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('art2d-delete-folder', async (_, folderPath) => {
+  try {
+    const artDir = getVaultArtDirectory();
+    const cleanFolder = (folderPath || '').trim();
+    if (!cleanFolder) return { success: false, error: 'Cannot delete root directory' };
+    const safePath = path.normalize(path.join(artDir, cleanFolder));
+    if (!safePath.toLowerCase().startsWith(artDir.toLowerCase()) || safePath.toLowerCase() === artDir.toLowerCase()) {
+      return { success: false, error: 'Access denied' };
+    }
+    if (fs.existsSync(safePath)) {
+      fs.rmSync(safePath, { recursive: true, force: true });
+      let assets = loadVaultArtMetadata(artDir);
+      assets = assets.filter((a) => !path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
+      saveVaultArtMetadata(artDir, assets);
+    }
+    return { success: true };
+  } catch (err) {
+    console.error('Error deleting 2D art folder:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('art2d-open-software', async (_, { filePath, preferredSoftware }) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -2467,11 +2710,12 @@ ipcMain.handle('art2d-open-software', async (_, { filePath, preferredSoftware })
   }
 });
 
-ipcMain.handle('art2d-open-folder', async () => {
+ipcMain.handle('art2d-open-folder', async (_, subfolder) => {
   try {
     const artDir = getVaultArtDirectory();
-    await shell.openPath(artDir);
-    return { success: true, artDir };
+    const target = subfolder ? path.join(artDir, subfolder) : artDir;
+    await shell.openPath(target);
+    return { success: true, artDir: target };
   } catch (err) {
     console.error('Error opening art folder:', err);
     return { success: false, error: err.message };

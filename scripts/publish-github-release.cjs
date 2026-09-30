@@ -94,7 +94,9 @@ function uploadAsset(uploadUrl, filePath, token) {
 }
 
 async function main() {
-  const version = '1.4.0';
+  const pkgPath = path.resolve(__dirname, '..', 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  const version = pkg.version || '1.6.0';
   const tag = `v${version}`;
   const owner = 'gugut2';
   const repo = 'albaqros';
@@ -109,26 +111,41 @@ async function main() {
     process.exit(1);
   }
 
-  const releaseTitle = `Albaqros v${version} - 3D Asset Library & Blender Scene Pipeline`;
+  const releaseTitle = `Albaqros v${version} - Folders for 2D/3D Libraries, Canvas Group Scaling & Nested Notes`;
   const releaseNotes = `## What's New in Albaqros v${version} 🦅
 
-### 📦 3D Asset Library for Blender Models
-- **Dedicated Studio Workspace Assets Tab**:
-  - Direct cataloging and organization for completed Blender (\`.blend\`) assets, props, characters, environments, vehicles, and modular sets.
-- **Automated Standardized 3/4 Isometric Previews**:
-  - Headless background rendering directly powered by the Blender CLI (\`--factory-startup -b -noaudio\`).
-  - Standardized **3/4 isometric perspective** camera angle (45° azimuth, ~32° elevation pointing downwards toward the bounding box center).
-  - Dynamic bounding box framing and focal distance calculation ensures every model (from small props to large buildings) is framed consistently with clean margins and no clipping.
-  - Rendered with Blender Workbench (\`STUDIO\` lighting, cavity ambient occlusion and ridge highlights, transparent background, 800×800 resolution) in ~1.5 seconds.
-- **Instant Mesh Technical Specifications**:
-  - Automatically calculates and indexes polygon/face counts, vertex counts, object counts, bounding dimensions (X × Y × Z in meters), and material lists.
-- **Send Models Back to Blender & Scene Assembly**:
-  - **1-Click Blender Launch**: Open any model directly in Blender.
-  - **Copy Append Snippet**: One-click copy of a ready-to-run Python console snippet to append or link the asset into your current active scene.
-  - **Scene Assembler**: Select multiple models with checkboxes and click **"Create Blender Scene from Selected"** to generate a new assembled \`.blend\` scene with the assets spaced along the studio floor and automatically launch Blender.
-  - **Drag & Drop**: Drag \`.blend\` files straight from Windows Explorer onto Albaqros to import and index them.
-- **Grid & Table Specification Views**:
-  - Switch between visual card grid view with large 3/4 renders and high-density table view for managing poly budgets and model dimensions.
+### 📁 Folders for 2D & 3D Asset Libraries
+- **Folder Organization**:
+  - Full hierarchical folder support in both the **2D Creative Art Library** and the **3D Asset Library**.
+  - Create new folders, rename folders, and delete folders with safety confirmation dialogs.
+  - Move assets between folders or organize items directly inside subfolders.
+  - Interactive breadcrumbs and intuitive folder path navigation.
+
+### 🎨 Canvas Multi-Selection, Grouping & Scaling
+- **Multi-Selection**:
+  - Shift-click multiple cards, notes, images, or assets on the infinite canvas.
+- **Group & Ungroup**:
+  - Group selected elements into a single cohesive unit with the Group toolbar button or keyboard shortcut.
+  - Ungroup whenever you need individual control.
+- **Group Dragging & Proportional Scaling**:
+  - Dragging any member of a group moves the entire group synchronously.
+  - Dedicated group bounding box with interactive corner scaling handle to scale entire diagrams and multi-asset layouts uniformly.
+
+### 📝 Notes Studio Nested Sub-Bullet Lists
+- **Tab & Shift+Tab Indentation**:
+  - Press \`Tab\` on any list item to immediately indent it as a nested sub-bullet under the preceding topic.
+  - Press \`Shift+Tab\` on a sub-bullet to outdent it back to the parent level.
+- **Smart Enter & Backspace Navigation**:
+  - Pressing \`Enter\` on an empty sub-bullet outdents to the parent level before exiting to normal paragraph text.
+  - Pressing \`Backspace\` on an empty sub-bullet or at the start of a sub-bullet outdents to the parent level.
+- **Markdown Hierarchy & Obsidian Sync**:
+  - Serializes nested lists to standard 2-space indented CommonMark/Obsidian format (\`  - sub-bullet\`).
+  - Reloads nested Markdown without flattening or losing hierarchy.
+  - Hierarchical bullet styling: Level 1 Disc (\`•\`), Level 2 Circle (\`◦\`), Level 3 Square (\`▪\`).
+
+### 🖼️ 2D Creative Art & Project Repository
+- Dedicated repository for Krita (\`.kra\`), Photoshop (\`.psd\`), PNG, JPEG, SVG, WebP, and digital art files.
+- Automated high-fidelity preview extraction and project metadata tracking.
 
 ---
 

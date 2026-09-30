@@ -677,6 +677,173 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     handleContentMutated();
   };
 
+  // Helper to determine nesting depth of an LI (1 for root, 2 for nested, etc.)
+  const getListNestingDepth = (li: HTMLElement): number => {
+    let depth = 0;
+    let curr: HTMLElement | null = li.parentElement;
+    while (curr && editorRef.current?.contains(curr)) {
+      if (curr.tagName.toUpperCase() === 'UL' || curr.tagName.toUpperCase() === 'OL') {
+        depth++;
+      }
+      curr = curr.parentElement;
+    }
+    return Math.max(1, depth);
+  };
+
+  // Indent a list item: creates a nested sublist under the upper topic (previous sibling LI)
+  const indentListItem = (currentLi: HTMLElement, sel: Selection) => {
+    const prevLi = currentLi.previousElementSibling as HTMLElement | null;
+    if (!prevLi || prevLi.tagName.toUpperCase() !== 'LI') {
+      // Cannot indent without an upper topic to nest under
+      return;
+    }
+
+    const parentList = currentLi.closest('ul, ol') as HTMLElement | null;
+    const isOl = parentList?.tagName.toUpperCase() === 'OL';
+
+    // Check if the previous LI already has a nested sublist
+    let subList = prevLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
+    if (!subList) {
+      subList = document.createElement(isOl ? 'ol' : 'ul');
+      subList.style.margin = isOl ? '4px 0 4px 20px' : '4px 0 4px 18px';
+      subList.style.padding = '0';
+      subList.style.fontSize = '0.92rem';
+      subList.style.color = '#f8fafc';
+      subList.style.lineHeight = '1.6';
+      if (!isOl) {
+        const depth = getListNestingDepth(prevLi);
+        subList.style.listStyleType = depth === 1 ? 'circle' : depth >= 2 ? 'square' : 'circle';
+      } else {
+        const depth = getListNestingDepth(prevLi);
+        subList.style.listStyleType = depth === 1 ? 'lower-alpha' : 'lower-roman';
+      }
+      prevLi.appendChild(subList);
+    }
+
+    const startNode = sel.anchorNode;
+    const startOffset = sel.anchorOffset;
+
+    // Move currentLi into the sublist
+    subList.appendChild(currentLi);
+
+    // Ensure empty li has at least a br so cursor is visible and types properly
+    if (!currentLi.childNodes.length || currentLi.innerHTML.trim() === '') {
+      currentLi.innerHTML = '<br>';
+    }
+
+    let cursorSet = false;
+    if (startNode && currentLi.contains(startNode)) {
+      try {
+        const range = document.createRange();
+        range.setStart(startNode, startOffset);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        lastRangeRef.current = range.cloneRange();
+        cursorSet = true;
+      } catch {
+        cursorSet = false;
+      }
+    }
+
+    if (!cursorSet) {
+      const range = document.createRange();
+      const subListEl = currentLi.querySelector(':scope > ul, :scope > ol');
+      if (subListEl) {
+        range.setStartBefore(subListEl);
+      } else {
+        range.selectNodeContents(currentLi);
+      }
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      lastRangeRef.current = range.cloneRange();
+    }
+
+    handleContentMutated();
+  };
+
+  // Outdent a list item: moves it back up towards the parent list
+  const outdentListItem = (currentLi: HTMLElement, sel: Selection) => {
+    const parentSubList = currentLi.closest('ul, ol') as HTMLElement | null;
+    if (!parentSubList) return;
+
+    const parentLi = parentSubList.parentElement?.closest('li') as HTMLElement | null;
+
+    if (parentLi && parentLi.parentElement) {
+      const startNode = sel.anchorNode;
+      const startOffset = sel.anchorOffset;
+
+      // If there are following siblings in parentSubList, preserve them as sublist of currentLi
+      const followingLis: Element[] = [];
+      let nextSib = currentLi.nextElementSibling;
+      while (nextSib) {
+        followingLis.push(nextSib);
+        nextSib = nextSib.nextElementSibling;
+      }
+
+      // Move currentLi to be immediately after parentLi in the upper list
+      parentLi.parentElement.insertBefore(currentLi, parentLi.nextSibling);
+
+      // If there were following siblings, move them into currentLi's sublist
+      if (followingLis.length > 0) {
+        const isOl = parentSubList.tagName.toUpperCase() === 'OL';
+        let newSubList = currentLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
+        if (!newSubList) {
+          newSubList = document.createElement(isOl ? 'ol' : 'ul');
+          newSubList.style.margin = isOl ? '4px 0 4px 20px' : '4px 0 4px 18px';
+          newSubList.style.padding = '0';
+          newSubList.style.fontSize = '0.92rem';
+          newSubList.style.color = '#f8fafc';
+          newSubList.style.lineHeight = '1.6';
+          currentLi.appendChild(newSubList);
+        }
+        followingLis.forEach((sib) => newSubList!.appendChild(sib));
+      }
+
+      // Clean up empty sublist if no children remain
+      if (parentSubList.children.length === 0) {
+        parentSubList.remove();
+      }
+
+      let cursorSet = false;
+      if (startNode && currentLi.contains(startNode)) {
+        try {
+          const range = document.createRange();
+          range.setStart(startNode, startOffset);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          lastRangeRef.current = range.cloneRange();
+          cursorSet = true;
+        } catch {
+          cursorSet = false;
+        }
+      }
+
+      if (!cursorSet) {
+        const range = document.createRange();
+        const subListEl = currentLi.querySelector(':scope > ul, :scope > ol');
+        if (subListEl) {
+          range.setStartBefore(subListEl);
+        } else {
+          range.selectNodeContents(currentLi);
+        }
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        lastRangeRef.current = range.cloneRange();
+      }
+
+      handleContentMutated();
+    } else {
+      // Already at root list level: convert into normal paragraph if empty
+      if (isListItemEmpty(currentLi)) {
+        exitListToNormalParagraph(currentLi, sel);
+      }
+    }
+  };
+
   // Keyboard events inside the Live ContentEditable Editor
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // 1. If inline [[ popup is open, handle navigation keys
@@ -708,6 +875,34 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       if (e.key === 'Escape') {
         e.preventDefault();
         setWikiPopup((prev) => ({ ...prev, open: false }));
+        return;
+      }
+    }
+
+    // Tab and Shift+Tab: Indent / Outdent list items (creates sub-bullet list for upper topic)
+    if (e.key === 'Tab') {
+      const sel = window.getSelection();
+      if (sel && sel.anchorNode) {
+        const currentLi = (
+          sel.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? (sel.anchorNode as HTMLElement).closest('li')
+            : sel.anchorNode.parentElement?.closest('li')
+        ) as HTMLElement | null;
+
+        if (currentLi && editorRef.current?.contains(currentLi)) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            outdentListItem(currentLi, sel);
+          } else {
+            indentListItem(currentLi, sel);
+          }
+          return;
+        }
+
+        // Outside list: insert 2 spaces instead of losing editor focus
+        e.preventDefault();
+        document.execCommand('insertText', false, '  ');
+        handleContentMutated();
         return;
       }
     }
@@ -979,7 +1174,13 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
         if (currentLi && isListItemEmpty(currentLi)) {
           e.preventDefault();
-          exitListToNormalParagraph(currentLi, sel);
+          const parentSubList = currentLi.closest('ul, ol') as HTMLElement | null;
+          const parentLi = parentSubList?.parentElement?.closest('li') as HTMLElement | null;
+          if (parentLi) {
+            outdentListItem(currentLi, sel);
+          } else {
+            exitListToNormalParagraph(currentLi, sel);
+          }
           return;
         }
 
@@ -1138,8 +1339,35 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
 
         if (currentLi && isListItemEmpty(currentLi)) {
           e.preventDefault();
-          exitListToNormalParagraph(currentLi, sel);
+          const parentSubList = currentLi.closest('ul, ol') as HTMLElement | null;
+          const parentLi = parentSubList?.parentElement?.closest('li') as HTMLElement | null;
+          if (parentLi) {
+            outdentListItem(currentLi, sel);
+          } else {
+            exitListToNormalParagraph(currentLi, sel);
+          }
           return;
+        }
+
+        // If at the beginning of a sub-bullet list item, Backspace outdents to parent list level
+        if (currentLi && sel.isCollapsed && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          try {
+            const preRange = document.createRange();
+            preRange.setStart(currentLi, 0);
+            preRange.setEnd(range.startContainer, range.startOffset);
+            if (preRange.toString().length === 0) {
+              const parentSubList = currentLi.closest('ul, ol') as HTMLElement | null;
+              const parentLi = parentSubList?.parentElement?.closest('li') as HTMLElement | null;
+              if (parentLi) {
+                e.preventDefault();
+                outdentListItem(currentLi, sel);
+                return;
+              }
+            }
+          } catch {
+            // Ignore range boundary mismatch
+          }
         }
 
         if (!currentLi) {

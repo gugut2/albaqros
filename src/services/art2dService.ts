@@ -99,21 +99,21 @@ function saveFallbackArtAssets(assets: Art2DAsset[]) {
 }
 
 export const Art2dService = {
-  async listAssets(): Promise<{ success: boolean; assets: Art2DAsset[]; artDir?: string; error?: string }> {
+  async listAssets(): Promise<{ success: boolean; assets: Art2DAsset[]; artDir?: string; folders?: string[]; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.listAssets) {
       try {
         const res = await (window as any).electronAPI.art2d.listAssets();
         if (res && res.success) {
-          return { success: true, assets: res.assets || [], artDir: res.artDir };
+          return { success: true, assets: res.assets || [], artDir: res.artDir, folders: res.folders || [] };
         }
-        return { success: false, assets: [], error: res?.error };
+        return { success: false, assets: [], folders: [], error: res?.error };
       } catch (err: any) {
         console.error('Error listing 2D art assets via Electron:', err);
-        return { success: false, assets: [], error: err.message };
+        return { success: false, assets: [], folders: [], error: err.message };
       }
     }
 
-    return { success: true, assets: getFallbackArtAssets() };
+    return { success: true, assets: getFallbackArtAssets(), folders: [] };
   },
 
   async importAsset(params: {
@@ -123,6 +123,7 @@ export const Art2dService = {
     tags?: string[];
     notes?: string;
     copyToVault?: boolean;
+    folder?: string;
   }): Promise<{ success: boolean; asset?: Art2DAsset; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.importAsset) {
       try {
@@ -142,6 +143,7 @@ export const Art2dService = {
       name: params.name || fileName.replace(/\.[^/.]+$/, ''),
       fileName,
       filePath: params.sourceFilePath,
+      folder: params.folder || '',
       fileSize: 1024 * 1024 * 4,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -163,10 +165,10 @@ export const Art2dService = {
     return { success: true, asset: newAsset };
   },
 
-  async selectAndImportAsset(): Promise<{ success: boolean; assets?: Art2DAsset[]; canceled?: boolean; error?: string }> {
+  async selectAndImportAsset(params?: { folder?: string }): Promise<{ success: boolean; assets?: Art2DAsset[]; canceled?: boolean; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.selectAndImportAsset) {
       try {
-        return await (window as any).electronAPI.art2d.selectAndImportAsset();
+        return await (window as any).electronAPI.art2d.selectAndImportAsset(params);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
@@ -233,16 +235,59 @@ export const Art2dService = {
     return { success: false, error: 'Opening files in creative software requires Electron desktop app.' };
   },
 
-  async openArtFolder(): Promise<{ success: boolean; artDir?: string; error?: string }> {
+  async openArtFolder(subfolder?: string): Promise<{ success: boolean; artDir?: string; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.openFolder) {
       try {
-        return await (window as any).electronAPI.art2d.openFolder();
+        return await (window as any).electronAPI.art2d.openFolder(subfolder);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
     }
 
     return { success: false, error: 'Opening folder requires Electron desktop app.' };
+  },
+
+  async createFolder(folderPath: string): Promise<{ success: boolean; folder?: string; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.createFolder) {
+      try {
+        return await (window as any).electronAPI.art2d.createFolder(folderPath);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    return { success: true, folder: folderPath };
+  },
+
+  async moveAsset(assetId: string, targetFolder: string): Promise<{ success: boolean; asset?: Art2DAsset; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.moveAsset) {
+      try {
+        return await (window as any).electronAPI.art2d.moveAsset(assetId, targetFolder);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    const assets = getFallbackArtAssets();
+    const idx = assets.findIndex((a) => a.id === assetId);
+    if (idx >= 0) {
+      assets[idx].folder = targetFolder;
+      saveFallbackArtAssets(assets);
+      return { success: true, asset: assets[idx] };
+    }
+    return { success: false, error: 'Artwork not found' };
+  },
+
+  async deleteFolder(folderPath: string): Promise<{ success: boolean; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.art2d?.deleteFolder) {
+      try {
+        return await (window as any).electronAPI.art2d.deleteFolder(folderPath);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    return { success: true };
   },
 
   async copyImageToClipboard(assetId: string): Promise<{ success: boolean; error?: string }> {

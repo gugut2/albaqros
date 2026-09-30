@@ -144,21 +144,20 @@ export function cleanCorruptedLinks(md: string): string {
 // Check if a list item (LI) has no words/content after it
 export function isListItemEmpty(li: HTMLElement | null): boolean {
   if (!li) return false;
-  const raw = (li.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
-  if (raw.length > 0) return false;
-
-  // Preserve items containing media, links, or inputs
-  if (li.querySelector('img, a, input, [data-note-target], [data-tag]')) {
+  // Preserve items containing media, links, inputs, or nested sublists
+  if (li.querySelector('img, a, input, ul, ol, [data-note-target], [data-tag]')) {
     return false;
   }
+  const raw = (li.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+  if (raw.length > 0) return false;
   return true;
 }
 
 // Clean and remove any empty list items in a container
 export function cleanAllEmptyListItems(root: HTMLElement, excludeLi?: HTMLElement | null): void {
-  const lists = root.querySelectorAll('ul, ol');
+  const lists = Array.from(root.querySelectorAll('ul, ol')).reverse();
   lists.forEach((list) => {
-    const lis = Array.from(list.querySelectorAll('li'));
+    const lis = Array.from(list.querySelectorAll(':scope > li'));
     lis.forEach((li) => {
       if (li !== excludeLi && isListItemEmpty(li as HTMLElement)) {
         li.remove();
@@ -168,6 +167,77 @@ export function cleanAllEmptyListItems(root: HTMLElement, excludeLi?: HTMLElemen
       list.remove();
     }
   });
+}
+
+interface ParsedMarkdownListItem {
+  type: 'ul' | 'ol';
+  level: number;
+  text: string;
+  numVal?: number;
+}
+
+function buildNestedListHtml(items: ParsedMarkdownListItem[]): string {
+  if (items.length === 0) return '';
+
+  const rootType = items[0].type;
+  const root = document.createElement(rootType);
+  if (rootType === 'ol') {
+    root.style.margin = '6px 0 6px 24px';
+    root.style.padding = '0';
+    root.style.fontSize = '0.92rem';
+    root.style.color = '#f8fafc';
+    root.style.lineHeight = '1.6';
+    root.style.listStyleType = 'decimal';
+    if (items[0].numVal && items[0].numVal > 1) {
+      root.setAttribute('start', String(items[0].numVal));
+    }
+  } else {
+    root.style.margin = '6px 0 6px 20px';
+    root.style.padding = '0';
+    root.style.fontSize = '0.92rem';
+    root.style.color = '#f8fafc';
+    root.style.lineHeight = '1.6';
+  }
+
+  const stack: { listEl: HTMLElement; level: number; lastLi: HTMLElement | null }[] = [
+    { listEl: root, level: 0, lastLi: null },
+  ];
+
+  for (const item of items) {
+    while (stack.length > 1 && item.level < stack[stack.length - 1].level) {
+      stack.pop();
+    }
+
+    let current = stack[stack.length - 1];
+
+    if (item.level > current.level && current.lastLi) {
+      const subList = document.createElement(item.type);
+      subList.style.margin = item.type === 'ol' ? '4px 0 4px 20px' : '4px 0 4px 18px';
+      subList.style.padding = '0';
+      subList.style.fontSize = '0.92rem';
+      subList.style.color = '#f8fafc';
+      subList.style.lineHeight = '1.6';
+      if (item.type === 'ul') {
+        subList.style.listStyleType = item.level === 1 ? 'circle' : 'square';
+      } else {
+        subList.style.listStyleType = item.level === 1 ? 'lower-alpha' : 'lower-roman';
+        if (item.numVal && item.numVal > 1) {
+          subList.setAttribute('start', String(item.numVal));
+        }
+      }
+      current.lastLi.appendChild(subList);
+      current = { listEl: subList, level: item.level, lastLi: null };
+      stack.push(current);
+    }
+
+    const li = document.createElement('li');
+    li.style.margin = '3px 0';
+    li.innerHTML = renderInlineToHtml(item.text);
+    current.listEl.appendChild(li);
+    current.lastLi = li;
+  }
+
+  return root.outerHTML;
 }
 
 export function markdownToHtml(md: string): string {
@@ -251,58 +321,44 @@ export function markdownToHtml(md: string): string {
       continue;
     }
 
-    // 4. Unordered bullet list (- or *)
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed === '-' || trimmed === '*') {
-      const listItems: string[] = [];
+    // 4. Lists (unordered bullet list - or *, or ordered numbered list 1. or 1), including nested sublists
+    const isBulletLine = (str: string) => /^[ \t]*[-*•](\s+.*|\s*)$/.test(str);
+    const isNumberedLine = (str: string) => /^[ \t]*\d+[.)](\s+.*|\s*)$/.test(str);
+    const isListLine = (str: string) => isBulletLine(str) || isNumberedLine(str);
+
+    if (isListLine(line)) {
+      const listItems: ParsedMarkdownListItem[] = [];
+      let baseIndent = -1;
+
       while (i < lines.length) {
-        const curTrim = lines[i].trim();
-        if (
-          curTrim.startsWith('- ') ||
-          curTrim.startsWith('* ') ||
-          curTrim === '-' ||
-          curTrim === '*'
-        ) {
-          const itemText = curTrim.replace(/^[-*]\s*/, '').trim();
-          listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
+        const rawLine = lines[i];
+        const curTrim = rawLine.trim();
+
+        if (isListLine(rawLine)) {
+          const leadSpaces = rawLine.match(/^([ \t]*)/)?.[1]?.replace(/\t/g, '  ').length || 0;
+          if (baseIndent === -1) {
+            baseIndent = leadSpaces;
+          }
+          const relIndent = Math.max(0, leadSpaces - baseIndent);
+          const level = Math.floor(relIndent / 2);
+
+          if (isNumberedLine(rawLine)) {
+            const numMatch = curTrim.match(/^(\d+)[.)]\s*(.*)$/);
+            const numVal = numMatch ? parseInt(numMatch[1], 10) : 1;
+            const text = numMatch ? numMatch[2].trim() : '';
+            listItems.push({ type: 'ol', level, text, numVal });
+          } else {
+            const bulletMatch = curTrim.match(/^[-*•]\s*(.*)$/);
+            const text = bulletMatch ? bulletMatch[1].trim() : '';
+            listItems.push({ type: 'ul', level, text });
+          }
           i++;
         } else if (
           curTrim === '' &&
           i + 1 < lines.length &&
-          (lines[i + 1].trim().startsWith('- ') || lines[i + 1].trim().startsWith('* '))
+          isListLine(lines[i + 1])
         ) {
-          // Allow loose list with empty line between bullet items
-          i++;
-        } else {
-          break;
-        }
-      }
-      if (listItems.length > 0) {
-        htmlParts.push(
-          `<ul style="margin: 6px 0 6px 20px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6;">${listItems.join('')}</ul>`
-        );
-      }
-      if (i < lines.length && lines[i].trim() === '') i++;
-      continue;
-    }
-
-    // 4b. Ordered numbered list (1. or 1))
-    if (/^\d+[.)]\s*/.test(trimmed)) {
-      const startMatch = trimmed.match(/^(\d+)[.)]/);
-      const startNum = startMatch ? parseInt(startMatch[1], 10) : 1;
-      const listItems: string[] = [];
-
-      while (i < lines.length) {
-        const curTrim = lines[i].trim();
-        if (/^\d+[.)]\s*/.test(curTrim)) {
-          const itemText = curTrim.replace(/^\d+[.)]\s*/, '').trim();
-          listItems.push(`<li style="margin: 3px 0;">${renderInlineToHtml(itemText)}</li>`);
-          i++;
-        } else if (
-          curTrim === '' &&
-          i + 1 < lines.length &&
-          /^\d+[.)]\s*/.test(lines[i + 1].trim())
-        ) {
-          // Allow loose list with empty line between numbered items
+          // Allow loose list with empty line between list items
           i++;
         } else {
           break;
@@ -310,10 +366,7 @@ export function markdownToHtml(md: string): string {
       }
 
       if (listItems.length > 0) {
-        const startAttr = startNum > 1 ? ` start="${startNum}"` : '';
-        htmlParts.push(
-          `<ol${startAttr} style="margin: 6px 0 6px 24px; padding: 0; font-size: 0.92rem; color: #f8fafc; line-height: 1.6; list-style-type: decimal;">${listItems.join('')}</ol>`
-        );
+        htmlParts.push(buildNestedListHtml(listItems));
       }
       if (i < lines.length && lines[i].trim() === '') i++;
       continue;
@@ -575,34 +628,8 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           md += `> ${processNodeToMarkdown(el).trim()}\n\n`;
           break;
         case 'UL':
-          for (let j = 0; j < el.children.length; j++) {
-            const li = el.children[j];
-            if (li.tagName.toUpperCase() === 'LI') {
-              let itemText = processNodeToMarkdown(li).trim();
-              itemText = itemText.replace(/^[-*•]\s*/, '').trim();
-              if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
-                md += `- ${itemText}\n`;
-              }
-            }
-          }
-          md += '\n';
-          break;
         case 'OL': {
-          const startAttr = el.getAttribute('start');
-          let olIndex = startAttr ? (parseInt(startAttr, 10) || 1) : 1;
-          for (let j = 0; j < el.children.length; j++) {
-            const li = el.children[j];
-            if (li.tagName.toUpperCase() === 'LI') {
-              let itemText = processNodeToMarkdown(li).trim();
-              // Strip redundant leading numbered marker if typed inside the <li>
-              itemText = itemText.replace(/^\d+[.)]\s*/, '').trim();
-              if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
-                md += `${olIndex}. ${itemText}\n`;
-                olIndex++;
-              }
-            }
-          }
-          md += '\n';
+          md += processListToMarkdown(el, 0);
           break;
         }
         case 'LI': {
@@ -641,6 +668,65 @@ function processNodeToMarkdown(node: Node, isTopLevel = false): string {
           break;
       }
     }
+  }
+
+  return md;
+}
+
+function processListToMarkdown(listEl: HTMLElement, indentLevel = 0): string {
+  const isOl = listEl.tagName.toUpperCase() === 'OL';
+  const startAttr = listEl.getAttribute('start');
+  let olIndex = startAttr ? parseInt(startAttr, 10) || 1 : 1;
+  const indent = '  '.repeat(indentLevel);
+  let md = '';
+
+  for (let j = 0; j < listEl.children.length; j++) {
+    const child = listEl.children[j] as HTMLElement;
+    const tag = child.tagName.toUpperCase();
+
+    if (tag === 'LI') {
+      // Find any nested lists inside this <li>
+      const nestedLists = Array.from(child.children).filter((c) => {
+        const cTag = c.tagName.toUpperCase();
+        return cTag === 'UL' || cTag === 'OL';
+      }) as HTMLElement[];
+
+      // Clone child LI and remove nested lists to extract only direct LI content
+      const liClone = child.cloneNode(true) as HTMLElement;
+      Array.from(liClone.children).forEach((c) => {
+        const cTag = c.tagName.toUpperCase();
+        if (cTag === 'UL' || cTag === 'OL') {
+          c.remove();
+        }
+      });
+
+      let itemText = processNodeToMarkdown(liClone, false).trim();
+      if (isOl) {
+        itemText = itemText.replace(/^\d+[.)]\s*/, '').trim();
+      } else {
+        itemText = itemText.replace(/^[-*•]\s*/, '').trim();
+      }
+
+      if (itemText && itemText.replace(/[\u00a0\u200b\s]/g, '').length > 0) {
+        if (isOl) {
+          md += `${indent}${olIndex}. ${itemText}\n`;
+          olIndex++;
+        } else {
+          md += `${indent}- ${itemText}\n`;
+        }
+      }
+
+      // Process any nested lists inside this <li> with indentLevel + 1
+      for (const nestedList of nestedLists) {
+        md += processListToMarkdown(nestedList, indentLevel + 1);
+      }
+    } else if (tag === 'UL' || tag === 'OL') {
+      md += processListToMarkdown(child, indentLevel + 1);
+    }
+  }
+
+  if (indentLevel === 0) {
+    md += '\n';
   }
 
   return md;

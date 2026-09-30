@@ -188,6 +188,23 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     origW: number;
     origH: number;
     aspectRatio?: number;
+    initialChildren?: {
+      id: string;
+      origX: number;
+      origY: number;
+      origW: number;
+      origH: number;
+      aspectRatio?: number;
+    }[];
+  } | null>(null);
+
+  // Rubber-band marquee selection state
+  const [marqueeState, setMarqueeState] = useState<{
+    startClientX: number;
+    startClientY: number;
+    currentClientX: number;
+    currentClientY: number;
+    isShift: boolean;
   } | null>(null);
 
   // Canvas Panning state
@@ -253,6 +270,8 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const [canRedo, setCanRedo] = useState<boolean>(false);
   const handleUndoRef = useRef<() => void>(() => {});
   const handleRedoRef = useRef<() => void>(() => {});
+  const handleGroupSelectedRef = useRef<() => void>(() => {});
+  const handleUngroupSelectedRef = useRef<() => void>(() => {});
 
   const canvasStageRef = useRef<HTMLDivElement>(null);
   const lastMousePosRef = useRef<{ clientX: number; clientY: number } | null>(null);
@@ -459,10 +478,183 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     showToast('Redo', 'info');
   }, [canvasData, showToast, triggerSave]);
 
+  // Helper to find all member nodes of a group (by explicit groupId or spatial containment)
+  const getGroupMembers = useCallback((groupNode: CanvasNode, allNodes: CanvasNode[]): CanvasNode[] => {
+    return allNodes.filter((n) => {
+      if (n.id === groupNode.id) return false;
+      if (n.groupId && n.groupId === groupNode.id) return true;
+      if (!n.groupId && n.type !== 'group') {
+        const isInside =
+          n.x >= groupNode.x &&
+          n.y >= groupNode.y &&
+          n.x + n.width <= groupNode.x + groupNode.width &&
+          n.y + n.height <= groupNode.y + groupNode.height;
+        return isInside;
+      }
+      return false;
+    });
+  }, []);
+
+  // Helper to expand a list of node IDs to include parent groups and child members
+  const expandNodesWithGroups = useCallback(
+    (targetIds: string[], allNodes: CanvasNode[]): string[] => {
+      const resultSet = new Set<string>(targetIds);
+      for (const id of targetIds) {
+        const node = allNodes.find((n) => n.id === id);
+        if (!node) continue;
+        if (node.type === 'group') {
+          const members = getGroupMembers(node, allNodes);
+          members.forEach((m) => resultSet.add(m.id));
+        } else if (node.groupId) {
+          resultSet.add(node.groupId);
+          const parentGroup = allNodes.find((n) => n.id === node.groupId);
+          if (parentGroup) {
+            const members = getGroupMembers(parentGroup, allNodes);
+            members.forEach((m) => resultSet.add(m.id));
+          }
+        }
+      }
+      return Array.from(resultSet);
+    },
+    [getGroupMembers]
+  );
+
+  // Group selected items
+  const handleGroupSelected = useCallback(() => {
+    const selectedNodes = canvasData.nodes.filter((n) => selectedNodeIds.includes(n.id));
+    if (selectedNodes.length < 2) {
+      showToast('Select at least 2 items to group (Hold Shift + click items)', 'warn');
+      return;
+    }
+
+    pushHistorySnapshot();
+
+    // Calculate bounding box of all selected nodes
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    selectedNodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.width);
+      maxY = Math.max(maxY, n.y + n.height);
+    });
+
+    const padding = 28;
+    const headerHeight = 44;
+    const groupX = Math.round(minX - padding);
+    const groupY = Math.round(minY - (padding + headerHeight));
+    const groupWidth = Math.round(maxX - minX + padding * 2);
+    const groupHeight = Math.round(maxY - minY + padding * 2 + headerHeight);
+
+    const newGroupId = `group-${Date.now()}`;
+    const newGroupNode: CanvasNode = {
+      id: newGroupId,
+      type: 'group',
+      x: groupX,
+      y: groupY,
+      width: groupWidth,
+      height: groupHeight,
+      label: `Group (${selectedNodes.length})`,
+      color: 'default',
+      zIndex: -1,
+    };
+
+    // Update child nodes to have groupId set
+    const updatedNodes = canvasData.nodes.map((n) => {
+      if (selectedNodeIds.includes(n.id)) {
+        return { ...n, groupId: newGroupId };
+      }
+      return n;
+    });
+
+    // Place group node at the beginning of nodes array so it renders behind member cards
+    const finalNodes = [newGroupNode, ...updatedNodes];
+    const updated = { ...canvasData, nodes: finalNodes };
+
+    setCanvasData(updated);
+    setSelectedNodeIds([newGroupId]);
+    triggerSave(updated);
+    showToast(`Grouped ${selectedNodes.length} items (Ctrl+G)`, 'success');
+  }, [canvasData, selectedNodeIds, pushHistorySnapshot, showToast, triggerSave]);
+
+  // Ungroup selected items
+  const handleUngroupSelected = useCallback(() => {
+    const groupIdsToUngroup = new Set<string>();
+
+    selectedNodeIds.forEach((id) => {
+      const node = canvasData.nodes.find((n) => n.id === id);
+      if (!node) return;
+      if (node.type === 'group') {
+        groupIdsToUngroup.add(node.id);
+      } else if (node.groupId) {
+        groupIdsToUngroup.add(node.groupId);
+      }
+    });
+
+    if (groupIdsToUngroup.size === 0) {
+      showToast('No groups selected to ungroup', 'warn');
+      return;
+    }
+
+    pushHistorySnapshot();
+
+    const memberIdsToSelect: string[] = [];
+
+    const updatedNodes = canvasData.nodes
+      .filter((n) => !groupIdsToUngroup.has(n.id))
+      .map((n) => {
+        if (n.groupId && groupIdsToUngroup.has(n.groupId)) {
+          memberIdsToSelect.push(n.id);
+          const { groupId: _, ...rest } = n;
+          return rest;
+        }
+        return n;
+      });
+
+    const updated = { ...canvasData, nodes: updatedNodes };
+    setCanvasData(updated);
+    setSelectedNodeIds(memberIdsToSelect.length > 0 ? memberIdsToSelect : []);
+    triggerSave(updated);
+    showToast(
+      `Ungrouped ${groupIdsToUngroup.size} group${groupIdsToUngroup.size > 1 ? 's' : ''} (Ctrl+Shift+G)`,
+      'info'
+    );
+  }, [canvasData, selectedNodeIds, pushHistorySnapshot, showToast, triggerSave]);
+
+  // Ungroup a specific group directly by ID
+  const handleUngroupSpecificGroup = useCallback(
+    (groupId: string) => {
+      pushHistorySnapshot();
+      const memberIdsToSelect: string[] = [];
+      const updatedNodes = canvasData.nodes
+        .filter((n) => n.id !== groupId)
+        .map((n) => {
+          if (n.groupId === groupId) {
+            memberIdsToSelect.push(n.id);
+            const { groupId: _, ...rest } = n;
+            return rest;
+          }
+          return n;
+        });
+
+      const updated = { ...canvasData, nodes: updatedNodes };
+      setCanvasData(updated);
+      setSelectedNodeIds(memberIdsToSelect);
+      triggerSave(updated);
+      showToast('Group disbanded', 'info');
+    },
+    [canvasData, pushHistorySnapshot, showToast, triggerSave]
+  );
+
   handleUndoRef.current = handleUndo;
   handleRedoRef.current = handleRedo;
+  handleGroupSelectedRef.current = handleGroupSelected;
+  handleUngroupSelectedRef.current = handleUngroupSelected;
 
-  // Key listeners (Space for pan, Delete/Backspace for delete, Esc to cancel, Ctrl+Z for undo, Ctrl+Y for redo)
+  // Key listeners (Space for pan, Delete/Backspace for delete, Esc to cancel, Ctrl+Z for undo, Ctrl+Y for redo, Ctrl+G for group)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -470,6 +662,17 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         target &&
         (target.matches('input, textarea, [contenteditable="true"]') ||
           target.closest('.canvas-card-editing'));
+
+      // Ctrl+G -> Group selected items, Ctrl+Shift+G -> Ungroup
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !isTyping) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleUngroupSelectedRef.current();
+        } else {
+          handleGroupSelectedRef.current();
+        }
+        return;
+      }
 
       // Ctrl+Z -> Undo, Ctrl+Y / Ctrl+Shift+Z -> Redo
       if (!isTyping) {
@@ -603,11 +806,25 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const clientXToStageX = (cx: number, stageLeft: number) => cx - stageLeft;
   const clientYToStageY = (cy: number, stageTop: number) => cy - stageTop;
 
-  // Background mouse down (Pan or Box Select or Deselect)
+  // Background mouse down (Pan or Shift-Marquee Box Select or Deselect)
   const handleStageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setImageContextMenu(null);
     setCanvasContextMenu(null);
-    // Middle click (button 1) or Space + Left click or Hand Tool -> Pan
+
+    // 1. Shift + Left Click/Drag initiates Marquee Selection
+    if (e.button === 0 && e.shiftKey && !isSpacePressedRef.current && activeTool !== 'hand') {
+      e.preventDefault();
+      setMarqueeState({
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        currentClientX: e.clientX,
+        currentClientY: e.clientY,
+        isShift: true,
+      });
+      return;
+    }
+
+    // 2. Middle click (button 1) or Space + Left click or Hand Tool -> Pan
     if (e.button === 1 || isSpacePressedRef.current || activeTool === 'hand' || (e.button === 0 && e.target === canvasStageRef.current)) {
       setIsPanning(true);
       panStartRef.current = {
@@ -617,7 +834,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         panY: pan.y,
       };
       if (canvasStageRef.current) canvasStageRef.current.style.cursor = 'grabbing';
-      if (e.target === canvasStageRef.current) {
+      if (e.target === canvasStageRef.current && !e.shiftKey) {
         setSelectedNodeIds([]);
         setSelectedEdgeId(null);
         setEditingNodeId(null);
@@ -625,11 +842,25 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     }
   };
 
-  // Global mouse move for Pan, Node Drag, Node Resize, Arrow Drawing
+  // Global mouse move for Pan, Node Drag, Node Resize, Marquee, Arrow Drawing
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     lastMousePosRef.current = { clientX: e.clientX, clientY: e.clientY };
 
-    // 1. Panning canvas
+    // 1. Marquee selection update
+    if (marqueeState) {
+      setMarqueeState((prev) =>
+        prev
+          ? {
+              ...prev,
+              currentClientX: e.clientX,
+              currentClientY: e.clientY,
+            }
+          : null
+      );
+      return;
+    }
+
+    // 2. Panning canvas
     if (isPanning && panStartRef.current) {
       const dx = e.clientX - panStartRef.current.clientX;
       const dy = e.clientY - panStartRef.current.clientY;
@@ -640,7 +871,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       return;
     }
 
-    // 2. Dragging nodes
+    // 3. Dragging nodes (moves all members in any group being dragged!)
     if (dragState && dragState.isDragging) {
       const dx = (e.clientX - dragState.startX) / zoom;
       const dy = (e.clientY - dragState.startY) / zoom;
@@ -661,29 +892,32 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       return;
     }
 
-    // 3. Resizing node
+    // 4. Resizing node (with proportional group scaling!)
     if (resizeState) {
       const dx = (e.clientX - resizeState.startX) / zoom;
       const dy = (e.clientY - resizeState.startY) / zoom;
 
-      const { handle, origX, origY, origW, origH, aspectRatio } = resizeState;
+      const { handle, origX, origY, origW, origH, aspectRatio, initialChildren } = resizeState;
       let newX = origX;
       let newY = origY;
       let newW = origW;
       let newH = origH;
 
-      if (handle.includes('e')) newW = Math.max(120, origW + dx);
-      if (handle.includes('s')) newH = Math.max(80, origH + dy);
+      const minW = initialChildren && initialChildren.length > 0 ? 160 : 120;
+      const minH = initialChildren && initialChildren.length > 0 ? 120 : 80;
+
+      if (handle.includes('e')) newW = Math.max(minW, origW + dx);
+      if (handle.includes('s')) newH = Math.max(minH, origH + dy);
       if (handle.includes('w')) {
         const potentialW = origW - dx;
-        if (potentialW >= 120) {
+        if (potentialW >= minW) {
           newW = potentialW;
           newX = origX + dx;
         }
       }
       if (handle.includes('n')) {
         const potentialH = origH - dy;
-        if (potentialH >= 80) {
+        if (potentialH >= minH) {
           newH = potentialH;
           newY = origY + dy;
         }
@@ -694,17 +928,56 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
         newH = Math.round(newW / aspectRatio);
       }
 
-      const updatedNodes = canvasData.nodes.map((node) =>
-        node.id === resizeState.nodeId
-          ? { ...node, x: Math.round(newX), y: Math.round(newY), width: Math.round(newW), height: Math.round(newH) }
-          : node
-      );
+      // Proportional scaling for all children inside a group
+      let childMap: Map<string, { x: number; y: number; width: number; height: number }> | null = null;
+      if (initialChildren && initialChildren.length > 0 && origW > 0 && origH > 0) {
+        childMap = new Map();
+        const scaleX = newW / origW;
+        const scaleY = newH / origH;
+
+        for (const child of initialChildren) {
+          const relX = child.origX - origX;
+          const relY = child.origY - origY;
+
+          const cNewX = Math.round(newX + relX * scaleX);
+          const cNewY = Math.round(newY + relY * scaleY);
+          const cNewW = Math.max(32, Math.round(child.origW * scaleX));
+          const cNewH =
+            child.aspectRatio && child.aspectRatio > 0
+              ? Math.max(24, Math.round(cNewW / child.aspectRatio))
+              : Math.max(24, Math.round(child.origH * scaleY));
+
+          childMap.set(child.id, {
+            x: cNewX,
+            y: cNewY,
+            width: cNewW,
+            height: cNewH,
+          });
+        }
+      }
+
+      const updatedNodes = canvasData.nodes.map((node) => {
+        if (node.id === resizeState.nodeId) {
+          return {
+            ...node,
+            x: Math.round(newX),
+            y: Math.round(newY),
+            width: Math.round(newW),
+            height: Math.round(newH),
+          };
+        }
+        if (childMap && childMap.has(node.id)) {
+          const childUpdate = childMap.get(node.id)!;
+          return { ...node, ...childUpdate };
+        }
+        return node;
+      });
 
       setCanvasData((prev) => ({ ...prev, nodes: updatedNodes }));
       return;
     }
 
-    // 4. Connecting arrow line
+    // 5. Connecting arrow line
     if (connectingFrom) {
       const worldPos = screenToWorld(e.clientX, e.clientY);
       setConnectingMouse(worldPos);
@@ -713,6 +986,54 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
 
   // Mouse up
   const handleMouseUp = () => {
+    // 1. Resolve Marquee selection
+    if (marqueeState) {
+      const { startClientX, startClientY, currentClientX, currentClientY, isShift } = marqueeState;
+      const dx = Math.abs(currentClientX - startClientX);
+      const dy = Math.abs(currentClientY - startClientY);
+
+      if (dx > 4 || dy > 4) {
+        const startWorld = screenToWorld(startClientX, startClientY);
+        const endWorld = screenToWorld(currentClientX, currentClientY);
+
+        const boxLeft = Math.min(startWorld.x, endWorld.x);
+        const boxRight = Math.max(startWorld.x, endWorld.x);
+        const boxTop = Math.min(startWorld.y, endWorld.y);
+        const boxBottom = Math.max(startWorld.y, endWorld.y);
+
+        const enclosedNodeIds = canvasData.nodes
+          .filter((n) => {
+            const nodeLeft = n.x;
+            const nodeRight = n.x + n.width;
+            const nodeTop = n.y;
+            const nodeBottom = n.y + n.height;
+
+            const intersects = !(
+              nodeRight < boxLeft ||
+              nodeLeft > boxRight ||
+              nodeBottom < boxTop ||
+              nodeTop > boxBottom
+            );
+            return intersects;
+          })
+          .map((n) => n.id);
+
+        if (isShift) {
+          const combined = Array.from(new Set([...selectedNodeIds, ...enclosedNodeIds]));
+          setSelectedNodeIds(combined);
+          if (enclosedNodeIds.length > 0) {
+            showToast(`Selected ${combined.length} items`, 'info');
+          }
+        } else {
+          setSelectedNodeIds(enclosedNodeIds);
+          if (enclosedNodeIds.length > 0) {
+            showToast(`Selected ${enclosedNodeIds.length} items`, 'info');
+          }
+        }
+      }
+      setMarqueeState(null);
+    }
+
     if (isPanning) {
       setIsPanning(false);
       panStartRef.current = null;
@@ -774,8 +1095,10 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
     setSelectedNodeIds(newSelected);
     setSelectedEdgeId(null);
 
-    // Prepare drag state
-    const nodesToMove = canvasData.nodes.filter((n) => newSelected.includes(n.id));
+    // Prepare drag state - expand to include all member nodes of any group and parent groups
+    const effectiveMoveIds = expandNodesWithGroups(newSelected, canvasData.nodes);
+    const nodesToMove = canvasData.nodes.filter((n) => effectiveMoveIds.includes(n.id));
+
     preMutationSnapshotRef.current = {
       nodes: JSON.parse(JSON.stringify(canvasData.nodes)),
       edges: JSON.parse(JSON.stringify(canvasData.edges)),
@@ -802,6 +1125,27 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       edges: JSON.parse(JSON.stringify(canvasData.edges)),
     };
 
+    let initialChildren: {
+      id: string;
+      origX: number;
+      origY: number;
+      origW: number;
+      origH: number;
+      aspectRatio?: number;
+    }[] = [];
+
+    if (node.type === 'group') {
+      const members = getGroupMembers(node, canvasData.nodes);
+      initialChildren = members.map((m) => ({
+        id: m.id,
+        origX: m.x,
+        origY: m.y,
+        origW: m.width,
+        origH: m.height,
+        aspectRatio: m.aspectRatio,
+      }));
+    }
+
     setResizeState({
       nodeId: node.id,
       handle,
@@ -812,6 +1156,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
       origW: node.width,
       origH: node.height,
       aspectRatio: node.aspectRatio,
+      initialChildren,
     });
   };
 
@@ -1279,7 +1624,12 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
   const handleDeleteSelectedNodes = () => {
     if (selectedNodeIds.length === 0) return;
     pushHistorySnapshot();
-    const remainingNodes = canvasData.nodes.filter((n) => !selectedNodeIds.includes(n.id));
+    const deletedGroupIds = new Set(
+      canvasData.nodes.filter((n) => selectedNodeIds.includes(n.id) && n.type === 'group').map((n) => n.id)
+    );
+    const remainingNodes = canvasData.nodes
+      .filter((n) => !selectedNodeIds.includes(n.id))
+      .map((n) => (n.groupId && deletedGroupIds.has(n.groupId) ? { ...n, groupId: undefined } : n));
     const remainingEdges = canvasData.edges.filter(
       (e) => !selectedNodeIds.includes(e.fromNode) && !selectedNodeIds.includes(e.toNode)
     );
@@ -2189,8 +2539,10 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                     e.stopPropagation();
                     setCanvasContextMenu(null);
                     if (isImage) {
-                      setSelectedNodeIds([node.id]);
-                      setSelectedEdgeId(null);
+                      if (!selectedNodeIds.includes(node.id)) {
+                        setSelectedNodeIds([node.id]);
+                        setSelectedEdgeId(null);
+                      }
                       setImageContextMenu({
                         nodeId: node.id,
                         x: e.clientX,
@@ -2230,7 +2582,7 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                     flexDirection: 'column',
                     overflow: 'visible',
                     pointerEvents: 'all',
-                    zIndex: isSelected ? 100 : node.zIndex || (node.type === 'group' ? 1 : 10),
+                    zIndex: isSelected ? (node.type === 'group' ? 5 : 100) : (node.zIndex || (node.type === 'group' ? 1 : 10)),
                     transition: 'border-color 0.15s, box-shadow 0.15s',
                   }}
                 >
@@ -2261,10 +2613,38 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                             ? node.label || 'Group'
                             : 'Card'}
                         </span>
+                        {node.type === 'group' && (
+                          <span
+                            style={{
+                              marginLeft: '4px',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              fontSize: '0.68rem',
+                              fontWeight: 500,
+                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                              color: '#94a3b8',
+                            }}
+                          >
+                            {getGroupMembers(node, canvasData.nodes).length} items
+                          </span>
+                        )}
                       </div>
 
                       {/* Node Actions Toolbar */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} onMouseDown={(e) => e.stopPropagation()}>
+                        {/* Ungroup button for group node */}
+                        {node.type === 'group' && (
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            onClick={() => handleUngroupSpecificGroup(node.id)}
+                            title="Ungroup (disband group) (Ctrl+Shift+G)"
+                            style={{ width: '20px', height: '20px', color: '#cbd5e1', marginRight: '2px' }}
+                          >
+                            <Layers size={11} style={{ transform: 'rotate(180deg)' }} />
+                          </button>
+                        )}
+
                         {/* Color Palette Picker */}
                         {(['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'] as CanvasColor[]).map((c) => (
                           <div
@@ -2290,8 +2670,11 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                           className="btn-icon"
                           onClick={() => {
                             pushHistorySnapshot();
+                            const isGrp = node.type === 'group';
                             const updated = {
-                              nodes: canvasData.nodes.filter((n) => n.id !== node.id),
+                              nodes: canvasData.nodes
+                                .filter((n) => n.id !== node.id)
+                                .map((n) => (isGrp && n.groupId === node.id ? { ...n, groupId: undefined } : n)),
                               edges: canvasData.edges.filter((e) => e.fromNode !== node.id && e.toNode !== node.id),
                             };
                             setCanvasData(updated);
@@ -2638,6 +3021,194 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               );
             })}
           </div>
+
+          {/* Marquee rubber-band selection rectangle overlay */}
+          {marqueeState && canvasStageRef.current && (() => {
+            const stageRect = canvasStageRef.current.getBoundingClientRect();
+            const left = Math.min(marqueeState.startClientX, marqueeState.currentClientX) - stageRect.left;
+            const top = Math.min(marqueeState.startClientY, marqueeState.currentClientY) - stageRect.top;
+            const width = Math.abs(marqueeState.currentClientX - marqueeState.startClientX);
+            const height = Math.abs(marqueeState.currentClientY - marqueeState.startClientY);
+
+            return (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${left}px`,
+                  top: `${top}px`,
+                  width: `${width}px`,
+                  height: `${height}px`,
+                  backgroundColor: 'rgba(99, 102, 241, 0.14)',
+                  border: '1.5px dashed #818cf8',
+                  borderRadius: '4px',
+                  boxShadow: '0 0 16px rgba(99, 102, 241, 0.25)',
+                  pointerEvents: 'none',
+                  zIndex: 900,
+                }}
+              />
+            );
+          })()}
+
+          {/* Floating Multi-Select & Group Toolbar */}
+          {(selectedNodeIds.length >= 2 ||
+            selectedNodeIds.some((id) => {
+              const n = canvasData.nodes.find((node) => node.id === id);
+              return n?.type === 'group' || !!n?.groupId;
+            })) && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '20px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 85,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 14px',
+                borderRadius: '30px',
+                backgroundColor: 'rgba(15, 20, 32, 0.94)',
+                border: '1px solid rgba(129, 140, 248, 0.4)',
+                backdropFilter: 'blur(16px)',
+                boxShadow: '0 12px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(99, 102, 241, 0.25)',
+                userSelect: 'none',
+              }}
+            >
+              {/* Badge: count */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '3px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.22)',
+                  color: '#c7d2fe',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                }}
+              >
+                <Layers size={13} style={{ color: '#818cf8' }} />
+                <span>{selectedNodeIds.length} selected</span>
+              </div>
+
+              <div style={{ width: '1px', height: '18px', backgroundColor: 'rgba(255, 255, 255, 0.12)' }} />
+
+              {/* Group Button */}
+              {selectedNodeIds.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={handleGroupSelected}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: '#4f46e5',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    color: '#ffffff',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(79, 70, 229, 0.4)',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#4338ca')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#4f46e5')}
+                  title="Group selected items (Ctrl+G)"
+                >
+                  <FolderPlus size={13} />
+                  <span>Group (Ctrl+G)</span>
+                </button>
+              )}
+
+              {/* Ungroup Button */}
+              {selectedNodeIds.some((id) => {
+                const n = canvasData.nodes.find((node) => node.id === id);
+                return n?.type === 'group' || !!n?.groupId;
+              }) && (
+                <button
+                  type="button"
+                  onClick={handleUngroupSelected}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.16)',
+                    color: '#e2e8f0',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)')}
+                  title="Ungroup selected items (Ctrl+Shift+G)"
+                >
+                  <Layers size={13} style={{ transform: 'rotate(180deg)' }} />
+                  <span>Ungroup (Ctrl+Shift+G)</span>
+                </button>
+              )}
+
+              {/* Color swatches */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '0 4px' }}>
+                {(['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'] as CanvasColor[]).map((c) => (
+                  <div
+                    key={c}
+                    onClick={() => {
+                      pushHistorySnapshot();
+                      const updatedNodes = canvasData.nodes.map((n) =>
+                        selectedNodeIds.includes(n.id) ? { ...n, color: c } : n
+                      );
+                      const updated = { ...canvasData, nodes: updatedNodes };
+                      setCanvasData(updated);
+                      triggerSave(updated);
+                    }}
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: COLOR_MAP[c].text,
+                      cursor: 'pointer',
+                      border: '1px solid rgba(0,0,0,0.5)',
+                      transition: 'transform 0.1s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.25)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.transform = 'none')}
+                    title={`Color selected ${c}`}
+                  />
+                ))}
+              </div>
+
+              <div style={{ width: '1px', height: '18px', backgroundColor: 'rgba(255, 255, 255, 0.12)' }} />
+
+              {/* Delete selected */}
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={handleDeleteSelectedNodes}
+                title="Delete selected (Delete)"
+                style={{ width: '28px', height: '28px', color: '#f87171' }}
+              >
+                <Trash2 size={14} />
+              </button>
+
+              {/* Clear selection */}
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setSelectedNodeIds([])}
+                title="Clear selection (Esc)"
+                style={{ width: '26px', height: '26px', color: '#94a3b8' }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
 
           {/* Bottom-Right Floating Zoom & Navigation Controls */}
           <div
@@ -3204,6 +3775,68 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
               <span>Toggle Fit Mode</span>
             </button>
 
+            {/* Group Selected items if 2+ selected */}
+            {selectedNodeIds.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImageContextMenu(null);
+                  handleGroupSelected();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: 'rgba(79, 70, 229, 0.15)',
+                  color: '#a5b4fc',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.28)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.15)')}
+              >
+                <FolderPlus size={13} style={{ color: '#818cf8' }} />
+                <span>Group Selected (Ctrl+G)</span>
+              </button>
+            )}
+
+            {/* Ungroup if any group is selected */}
+            {selectedNodeIds.some((id) => {
+              const n = canvasData.nodes.find((node) => node.id === id);
+              return n?.type === 'group' || !!n?.groupId;
+            }) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImageContextMenu(null);
+                  handleUngroupSelected();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#cbd5e1',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <Layers size={13} style={{ color: '#94a3b8', transform: 'rotate(180deg)' }} />
+                <span>Ungroup (Ctrl+Shift+G)</span>
+              </button>
+            )}
+
             {/* Delete Image Option */}
             <button
               type="button"
@@ -3402,6 +4035,109 @@ export const CanvasStudioView: React.FC<CanvasStudioViewProps> = ({
                 Ctrl+Y
               </span>
             </button>
+
+            {/* Group Selected items if 2+ selected */}
+            {selectedNodeIds.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCanvasContextMenu(null);
+                  handleGroupSelected();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 9px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: 'rgba(79, 70, 229, 0.15)',
+                  color: '#a5b4fc',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  transition: 'background 0.12s, color 0.12s',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.28)';
+                  e.currentTarget.style.color = '#ffffff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.15)';
+                  e.currentTarget.style.color = '#a5b4fc';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FolderPlus size={13} style={{ color: '#818cf8' }} />
+                  <span>Group Selected</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.65rem',
+                    color: '#818cf8',
+                    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                  }}
+                >
+                  Ctrl+G
+                </span>
+              </button>
+            )}
+
+            {/* Ungroup if any group is selected */}
+            {selectedNodeIds.some((id) => {
+              const n = canvasData.nodes.find((node) => node.id === id);
+              return n?.type === 'group' || !!n?.groupId;
+            }) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCanvasContextMenu(null);
+                  handleUngroupSelected();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 9px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#cbd5e1',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  transition: 'background 0.12s, color 0.12s',
+                  textAlign: 'left',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  e.currentTarget.style.color = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#cbd5e1';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Layers size={13} style={{ color: '#94a3b8', transform: 'rotate(180deg)' }} />
+                  <span>Ungroup</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.65rem',
+                    color: '#64748b',
+                    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                  }}
+                >
+                  Ctrl+Shift+G
+                </span>
+              </button>
+            )}
 
             <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.07)', margin: '4px 0' }} />
 

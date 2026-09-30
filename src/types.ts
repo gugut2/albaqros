@@ -265,6 +265,8 @@ export interface CanvasNode {
   // For group node:
   label?: string;
   zIndex?: number;
+  // Group membership:
+  groupId?: string; // ID of the parent group node this node belongs to
 }
 
 export type CanvasEdgeSide = 'top' | 'right' | 'bottom' | 'left';
@@ -331,6 +333,7 @@ export interface BlenderAsset {
   fileName: string;
   filePath: string; // Absolute path to the .blend file on disk
   relativePath?: string; // Relative to vault models/
+  folder?: string; // Subfolder path relative to models/ e.g. "Vehicles" or "" for root
   previewUrl?: string; // Base64 data URL for instant rendering in UI
   previewPath?: string; // Absolute path to rendered preview PNG
   fileSize: number; // Size in bytes
@@ -369,6 +372,7 @@ export interface Art2DAsset {
   fileName: string; // File name on disk e.g. "cyberpunk_cityscape.kra"
   filePath: string; // Absolute path to file on disk
   relativePath?: string; // Relative to vault art/
+  folder?: string; // Subfolder path relative to art/ e.g. "Characters" or "" for root
   previewUrl?: string; // Base64 data URL for instant rendering in UI
   previewPath?: string; // Absolute path to rendered preview PNG in .previews
   fileSize: number; // Size in bytes
