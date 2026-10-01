@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CheckSquare,
   BarChart2,
@@ -74,6 +74,7 @@ interface MaximizedViewProps {
   onDeleteSubproperty?: (propertyId: string, subpropertyId: string) => void;
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
+  initialNotePath?: string | null;
 }
 
 type StudioTab = 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
@@ -117,8 +118,16 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onDeleteSubproperty,
   onOpenManageProperties,
   onOpenManageReminders,
+  initialNotePath,
 }) => {
   const [activeTab, setActiveTab] = useState<StudioTab>('today');
+
+  // Auto-switch to notes tab when a docked note is requested
+  useEffect(() => {
+    if (initialNotePath) {
+      setActiveTab('notes');
+    }
+  }, [initialNotePath]);
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
   const [analyticsPropertyId, setAnalyticsPropertyId] = useState<string | undefined>(undefined);
 
@@ -838,6 +847,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             <NotesStudioView
               isStudioSidebarCollapsed={isStudioSidebarCollapsed}
               onToggleStudioSidebar={toggleStudioSidebar}
+              initialNotePath={initialNotePath}
             />
           </div>
         )}

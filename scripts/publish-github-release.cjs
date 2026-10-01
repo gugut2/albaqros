@@ -111,41 +111,23 @@ async function main() {
     process.exit(1);
   }
 
-  const releaseTitle = `Albaqros v${version} - Folders for 2D/3D Libraries, Canvas Group Scaling & Nested Notes`;
+  const releaseTitle = `Albaqros v${version} - Detached Floating Note Windows & Multi-Tab Multitasking`;
   const releaseNotes = `## What's New in Albaqros v${version} 🦅
 
-### 📁 Folders for 2D & 3D Asset Libraries
-- **Folder Organization**:
-  - Full hierarchical folder support in both the **2D Creative Art Library** and the **3D Asset Library**.
-  - Create new folders, rename folders, and delete folders with safety confirmation dialogs.
-  - Move assets between folders or organize items directly inside subfolders.
-  - Interactive breadcrumbs and intuitive folder path navigation.
-
-### 🎨 Canvas Multi-Selection, Grouping & Scaling
-- **Multi-Selection**:
-  - Shift-click multiple cards, notes, images, or assets on the infinite canvas.
-- **Group & Ungroup**:
-  - Group selected elements into a single cohesive unit with the Group toolbar button or keyboard shortcut.
-  - Ungroup whenever you need individual control.
-- **Group Dragging & Proportional Scaling**:
-  - Dragging any member of a group moves the entire group synchronously.
-  - Dedicated group bounding box with interactive corner scaling handle to scale entire diagrams and multi-asset layouts uniformly.
-
-### 📝 Notes Studio Nested Sub-Bullet Lists
-- **Tab & Shift+Tab Indentation**:
-  - Press \`Tab\` on any list item to immediately indent it as a nested sub-bullet under the preceding topic.
-  - Press \`Shift+Tab\` on a sub-bullet to outdent it back to the parent level.
-- **Smart Enter & Backspace Navigation**:
-  - Pressing \`Enter\` on an empty sub-bullet outdents to the parent level before exiting to normal paragraph text.
-  - Pressing \`Backspace\` on an empty sub-bullet or at the start of a sub-bullet outdents to the parent level.
-- **Markdown Hierarchy & Obsidian Sync**:
-  - Serializes nested lists to standard 2-space indented CommonMark/Obsidian format (\`  - sub-bullet\`).
-  - Reloads nested Markdown without flattening or losing hierarchy.
-  - Hierarchical bullet styling: Level 1 Disc (\`•\`), Level 2 Circle (\`◦\`), Level 3 Square (\`▪\`).
-
-### 🖼️ 2D Creative Art & Project Repository
-- Dedicated repository for Krita (\`.kra\`), Photoshop (\`.psd\`), PNG, JPEG, SVG, WebP, and digital art files.
-- Automated high-fidelity preview extraction and project metadata tracking.
+### 🪟 Detached Floating Note Windows
+- **Pop Out Any Note into its Own Window**:
+  - Pop out any note into an independent, frameless desktop window from either the note editor toolbar (**Pop Out**) or directly from the Knowledge & Notes sidebar.
+  - Work across multiple Albaqros tabs simultaneously—keep your popped-out note open while exploring the **Canvas**, organizing **3D Assets**, reviewing **2D Art**, or checking daily **Tasks**.
+- **Always on Top Pin**:
+  - Pin the floating note to keep it visible on top of all applications (Blender, Krita, Photoshop, IDE, browser).
+- **Full Live Markdown Editor**:
+  - Retains all live formatting, nested sub-bullet indentation (\`Tab\` / \`Shift+Tab\`), \`[[\` autocomplete popup, tags, and character/word stats in the detached window.
+- **Dock Back to Albaqros (\`Ctrl+Shift+D\`)**:
+  - Seamlessly dock the note back into the main Albaqros window with one click or hotkey.
+  - Auto-flushes any unsaved edits, closes the floating window, brings Albaqros to the foreground in Maximized Studio mode on the Notes tab, and focuses the note.
+- **Instant Multi-Window Synchronization**:
+  - Changes made in either window immediately persist to disk and broadcast across all open windows.
+  - Renaming, deleting, or editing notes reflects live across every window.
 
 ---
 

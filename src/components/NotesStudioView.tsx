@@ -44,12 +44,14 @@ interface NotesStudioViewProps {
   onOpenTask?: (taskId: string) => void;
   isStudioSidebarCollapsed?: boolean;
   onToggleStudioSidebar?: () => void;
+  initialNotePath?: string | null;
 }
 
 export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
   onOpenTask,
   isStudioSidebarCollapsed = false,
   onToggleStudioSidebar,
+  initialNotePath,
 }) => {
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [activeNotePath, setActiveNotePath] = useState<string | null>(null);
@@ -173,6 +175,7 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
       const currentPath = activeNotePathRef.current;
       const targetPath =
         selectPath ||
+        initialNotePath ||
         (currentPath && res.notes.some((n) => n.relativePath === currentPath)
           ? currentPath
           : res.notes[0]?.relativePath);
@@ -196,6 +199,85 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
   useEffect(() => {
     loadNotesList();
   }, [loadNotesList]);
+
+  // Floating / Detached note windows state
+  const [detachedNotes, setDetachedNotes] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Initial fetch of detached notes
+    NotesService.getDetachedNotes().then((list) => {
+      setDetachedNotes(list);
+    });
+
+    const unsubDetached = NotesService.onDetachedNotesChanged((list) => {
+      setDetachedNotes(list);
+    });
+
+    const unsubDocked = NotesService.onNoteDocked(({ relativePath }) => {
+      selectNote(relativePath);
+    });
+
+    const unsubContent = NotesService.onNoteContentChanged(({ relativePath, content }) => {
+      // If the currently active note is changed in a detached window, sync it here
+      if (activeNotePathRef.current === relativePath) {
+        const currentActiveTags = extractAllNoteTags(content);
+        setActiveTags(currentActiveTags);
+        activeTagsRef.current = currentActiveTags;
+        setActiveContent(content);
+        setLastSavedTime(new Date());
+        if (editorRef.current && document.activeElement !== editorRef.current) {
+          editorRef.current.innerHTML = markdownToHtml(content);
+        }
+      }
+
+      // Update in notes list
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.relativePath === relativePath
+            ? {
+                ...n,
+                title: extractTitle(content, relativePath),
+                tags: extractAllNoteTags(content),
+                preview: extractPlainTextPreview(content),
+                updatedAt: new Date().toISOString(),
+              }
+            : n
+        )
+      );
+    });
+
+    const unsubRenamed = NotesService.onNoteRenamed(({ oldRelativePath, newRelativePath, newTitle }) => {
+      if (activeNotePathRef.current === oldRelativePath) {
+        setActiveNotePath(newRelativePath);
+        activeNotePathRef.current = newRelativePath;
+      }
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.relativePath === oldRelativePath
+            ? {
+                ...n,
+                relativePath: newRelativePath,
+                title: newTitle,
+                updatedAt: new Date().toISOString(),
+              }
+            : n
+        )
+      );
+    });
+
+    return () => {
+      unsubDetached();
+      unsubDocked();
+      unsubContent();
+      unsubRenamed();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialNotePath && initialNotePath !== activeNotePathRef.current) {
+      selectNote(initialNotePath);
+    }
+  }, [initialNotePath]);
 
   const activeNotePathRef = useRef<string | null>(null);
   activeNotePathRef.current = activeNotePath;
@@ -1620,6 +1702,31 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
     return notes.find((n) => n.relativePath === activeNotePath);
   }, [notes, activeNotePath]);
 
+  // Floating / Detached state for the active note
+  const isCurrentNoteDetached = useMemo(() => {
+    return !!activeNotePath && detachedNotes.includes(activeNotePath);
+  }, [activeNotePath, detachedNotes]);
+
+  // Open detached floating window for a note
+  const handlePopOutNote = async (targetPath?: string) => {
+    const path = targetPath || activeNotePath;
+    if (!path) return;
+    if (path === activeNotePathRef.current) {
+      await flushSave(path);
+    }
+    const note = notes.find((n) => n.relativePath === path);
+    const title = note ? note.title : 'Note';
+    await NotesService.openDetachedWindow(path, title);
+  };
+
+  // Dock a floating note back into Albaqros
+  const handleDockBackNote = async (targetPath?: string) => {
+    const path = targetPath || activeNotePath;
+    if (!path) return;
+    await NotesService.dockNoteBack(path);
+    selectNote(path);
+  };
+
   // Backlinks
   const backlinks = useMemo(() => {
     if (!activeNote) return [];
@@ -2145,9 +2252,45 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                       >
                         {note.title}
                       </span>
+                      {detachedNotes.includes(note.relativePath) && (
+                        <span
+                          style={{
+                            fontSize: '0.58rem',
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                            color: '#fbbf24',
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                            flexShrink: 0,
+                          }}
+                          title="This note is currently open in a floating window"
+                        >
+                          Floating
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePopOutNote(note.relativePath);
+                        }}
+                        title={detachedNotes.includes(note.relativePath) ? "Focus floating window" : "Pop out note into floating window"}
+                        style={{
+                          padding: '2px',
+                          width: '20px',
+                          height: '20px',
+                          color: detachedNotes.includes(note.relativePath) ? '#f59e0b' : 'var(--text-muted)',
+                        }}
+                      >
+                        <ExternalLink size={11} />
+                      </button>
                       <button
                         type="button"
                         className="btn-icon"
@@ -2982,8 +3125,104 @@ export const NotesStudioView: React.FC<NotesStudioViewProps> = ({
                       [[
                     </span>
                   </button>
+
+                  <div style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-subtle)', margin: '0 2px' }} />
+
+                  <button
+                    type="button"
+                    onClick={() => handlePopOutNote()}
+                    title="Pop out note into floating window so you can use other Albaqros tabs simultaneously"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      backgroundColor: isCurrentNoteDetached ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                      border: isCurrentNoteDetached ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid var(--border-subtle)',
+                      color: isCurrentNoteDetached ? '#fbbf24' : 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = isCurrentNoteDetached ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.1)';
+                      e.currentTarget.style.color = '#ffffff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = isCurrentNoteDetached ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.05)';
+                      e.currentTarget.style.color = isCurrentNoteDetached ? '#fbbf24' : 'var(--text-secondary)';
+                    }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>{isCurrentNoteDetached ? 'Floating' : 'Pop Out'}</span>
+                  </button>
                 </div>
               </div>
+
+              {/* Floating window banner if active note is currently detached */}
+              {isCurrentNoteDetached && (
+                <div
+                  style={{
+                    marginBottom: '16px',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', color: '#fbbf24' }}>
+                    <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b', boxShadow: '0 0 8px #f59e0b' }} />
+                    <span><strong>Floating Window Active:</strong> This note is open in a detached window. All changes sync live across windows.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handlePopOutNote()}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '4px 10px',
+                        borderRadius: '5px',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        color: '#fef3c7',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <ExternalLink size={11} />
+                      <span>Focus Window</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDockBackNote(activeNote.relativePath)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '4px 10px',
+                        borderRadius: '5px',
+                        border: 'none',
+                        backgroundColor: '#f59e0b',
+                        color: '#0f172a',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span>Dock Back to Albaqros</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div
                 ref={editorRef}

@@ -295,6 +295,105 @@ export const NotesService = {
     return false;
   },
 
+  async openDetachedWindow(relativePath: string, title?: string): Promise<boolean> {
+    const api = (window as any).electronAPI;
+    const invoker = api?.notes?.openDetachedWindow || api?.openDetachedWindow;
+    if (invoker) {
+      try {
+        const res = await invoker({ relativePath, title });
+        return Boolean(res && res.success);
+      } catch (err) {
+        console.error('Error opening detached note window via Electron:', err);
+      }
+    }
+
+    // Guard: When running inside Electron, do NOT call window.open because it would open an external OS browser tab!
+    if (typeof window !== 'undefined' && (window as any).electronAPI) {
+      console.warn('Detached note window requested in Electron, but Electron main process has not been restarted yet.');
+      alert('To enable detached floating windows, please restart Albaqros (close and re-launch the app so the new window manager is loaded).');
+      return false;
+    }
+
+    // Pure web browser fallback (only when running in a standalone web browser without Electron)
+    const width = 800;
+    const height = 850;
+    const left = Math.max(50, window.screenX + 50);
+    const top = Math.max(50, window.screenY + 50);
+    window.open(
+      `?mode=detached-note&notePath=${encodeURIComponent(relativePath)}`,
+      `note_${relativePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+    return true;
+  },
+
+  async dockNoteBack(relativePath: string): Promise<boolean> {
+    const api = (window as any).electronAPI;
+    const invoker = api?.notes?.dockNoteBack || api?.dockNoteBack;
+    if (invoker) {
+      try {
+        const res = await invoker(relativePath);
+        return Boolean(res && res.success);
+      } catch (err) {
+        console.error('Error docking note back via Electron:', err);
+      }
+    }
+    // Browser fallback: notify opener and close
+    if (window.opener) {
+      window.opener.postMessage({ type: 'note-docked', relativePath }, '*');
+      window.close();
+    }
+    return true;
+  },
+
+  async getDetachedNotes(): Promise<string[]> {
+    const api = (window as any).electronAPI;
+    const invoker = api?.notes?.getDetachedNotes || api?.getDetachedNotes;
+    if (invoker) {
+      try {
+        const res = await invoker();
+        return Array.isArray(res) ? res : [];
+      } catch (err) {
+        console.error('Error getting detached notes list:', err);
+      }
+    }
+    return [];
+  },
+
+  onNoteDocked(callback: (data: { relativePath: string }) => void): () => void {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.notes?.onNoteDocked) {
+      return (window as any).electronAPI.notes.onNoteDocked(callback);
+    }
+    const listener = (e: MessageEvent) => {
+      if (e.data?.type === 'note-docked') {
+        callback({ relativePath: e.data.relativePath });
+      }
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  },
+
+  onDetachedNotesChanged(callback: (detachedList: string[]) => void): () => void {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.notes?.onDetachedNotesChanged) {
+      return (window as any).electronAPI.notes.onDetachedNotesChanged(callback);
+    }
+    return () => {};
+  },
+
+  onNoteContentChanged(callback: (data: { relativePath: string; content: string }) => void): () => void {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.notes?.onNoteContentChanged) {
+      return (window as any).electronAPI.notes.onNoteContentChanged(callback);
+    }
+    return () => {};
+  },
+
+  onNoteRenamed(callback: (data: { oldRelativePath: string; newRelativePath: string; newTitle: string }) => void): () => void {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.notes?.onNoteRenamed) {
+      return (window as any).electronAPI.notes.onNoteRenamed(callback);
+    }
+    return () => {};
+  },
+
   findBacklinks(
     currentTitle: string,
     allNotes: NoteMetadata[]

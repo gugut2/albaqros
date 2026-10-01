@@ -43,7 +43,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreBackup: (filePath) => ipcRenderer.invoke('backup-restore', filePath),
   openBackupsFolder: (location) => ipcRenderer.invoke('backup-open-folder', location),
   syncMarkdownNow: () => ipcRenderer.invoke('markdown-sync-now'),
-  openMarkdownFile: (fileName) => ipcRenderer.invoke('open-markdown-file', fileName),
+  maximize: () => ipcRenderer.invoke('window-maximize'),
+  isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  openDetachedWindow: (params) => ipcRenderer.invoke('notes-open-detached', params),
+  dockNoteBack: (relativePath) => ipcRenderer.invoke('notes-dock-back', relativePath),
+  getDetachedNotes: () => ipcRenderer.invoke('notes-get-detached'),
   notes: {
     listNotes: () => ipcRenderer.invoke('notes-list'),
     readNote: (relativePath) => ipcRenderer.invoke('notes-read', relativePath),
@@ -54,6 +58,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('notes-rename', { oldRelativePath, newTitle, newFolder }),
     createFolder: (folderPath) => ipcRenderer.invoke('notes-create-folder', folderPath),
     openNotesFolder: (relativePath) => ipcRenderer.invoke('notes-open-folder', relativePath),
+    openDetachedWindow: (params) => ipcRenderer.invoke('notes-open-detached', params),
+    dockNoteBack: (relativePath) => ipcRenderer.invoke('notes-dock-back', relativePath),
+    getDetachedNotes: () => ipcRenderer.invoke('notes-get-detached'),
+    onNoteDocked: (callback) => {
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('note-docked', listener);
+      return () => ipcRenderer.removeListener('note-docked', listener);
+    },
+    onDetachedNotesChanged: (callback) => {
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('detached-notes-changed', listener);
+      return () => ipcRenderer.removeListener('detached-notes-changed', listener);
+    },
+    onNoteContentChanged: (callback) => {
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('note-content-changed', listener);
+      return () => ipcRenderer.removeListener('note-content-changed', listener);
+    },
+    onNoteRenamed: (callback) => {
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('note-renamed', listener);
+      return () => ipcRenderer.removeListener('note-renamed', listener);
+    },
   },
   canvas: {
     listCanvases: () => ipcRenderer.invoke('canvas-list'),

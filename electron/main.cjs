@@ -29,6 +29,7 @@ if (process.platform === 'win32') {
 }
 
 let mainWindow = null;
+const detachedNoteWindows = new Map(); // relativePath -> BrowserWindow
 let isCompact = false;
 let fileWatcher = null;
 let tray = null;
@@ -291,8 +292,33 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
   }
 
-  // Intercept window open (target="_blank" or window.open) to open in OS default browser
+  // Intercept window open (target="_blank" or window.open)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const isLocal =
+      url.startsWith('http://localhost:5173') ||
+      url.startsWith('http://127.0.0.1:5173') ||
+      url.startsWith('file://');
+
+    if (isLocal) {
+      try {
+        const parsed = new URL(url);
+        const mode =
+          parsed.searchParams.get('mode') ||
+          (parsed.hash && new URLSearchParams(parsed.hash.replace(/^#/, '')).get('mode'));
+        const notePath =
+          parsed.searchParams.get('notePath') ||
+          (parsed.hash && new URLSearchParams(parsed.hash.replace(/^#/, '')).get('notePath'));
+
+        if (mode === 'detached-note' && notePath) {
+          openDetachedNoteWindow(decodeURIComponent(notePath));
+          return { action: 'deny' };
+        }
+      } catch (err) {
+        console.error('Error handling internal window open:', err);
+      }
+      return { action: 'allow' };
+    }
+
     if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:')) {
       shell.openExternal(url);
       return { action: 'deny' };
@@ -313,13 +339,147 @@ function createWindow() {
   setupFileWatcher(getActiveDataFilePath());
 }
 
+function broadcastDetachedNotesList() {
+  const list = Array.from(detachedNoteWindows.keys());
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) {
+      w.webContents.send('detached-notes-changed', list);
+    }
+  });
+}
+
+function openDetachedNoteWindow(relativePath, title) {
+  if (detachedNoteWindows.has(relativePath)) {
+    const existing = detachedNoteWindows.get(relativePath);
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+      return { success: true, focused: true };
+    }
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+  const iconPath = path.join(__dirname, '../assets/icon.png');
+
+  const winW = Math.min(840, Math.floor(screenWidth * 0.6));
+  const winH = Math.min(880, Math.floor(screenHeight * 0.85));
+  const winX = Math.max(30, Math.floor((screenWidth - winW) / 2) - 30);
+  const winY = Math.max(30, Math.floor((screenHeight - winH) / 2));
+
+  const noteWin = new BrowserWindow({
+    title: `${title || path.basename(relativePath, '.md')} - Albaqros`,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    width: winW,
+    height: winH,
+    x: winX,
+    y: winY,
+    minWidth: 420,
+    minHeight: 450,
+    frame: false,
+    backgroundColor: '#0b0d11',
+    hasShadow: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  detachedNoteWindows.set(relativePath, noteWin);
+
+  const distPath = path.join(__dirname, '../dist/index.html');
+  const isDev = !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development');
+
+  noteWin.webContents.setWindowOpenHandler(({ url }) => {
+    const isLocal =
+      url.startsWith('http://localhost:5173') ||
+      url.startsWith('http://127.0.0.1:5173') ||
+      url.startsWith('file://');
+
+    if (isLocal) {
+      try {
+        const parsed = new URL(url);
+        const mode =
+          parsed.searchParams.get('mode') ||
+          (parsed.hash && new URLSearchParams(parsed.hash.replace(/^#/, '')).get('mode'));
+        const notePath =
+          parsed.searchParams.get('notePath') ||
+          (parsed.hash && new URLSearchParams(parsed.hash.replace(/^#/, '')).get('notePath'));
+
+        if (mode === 'detached-note' && notePath) {
+          openDetachedNoteWindow(decodeURIComponent(notePath));
+          return { action: 'deny' };
+        }
+      } catch (err) {
+        console.error('Error handling internal window open from detached note:', err);
+      }
+      return { action: 'allow' };
+    }
+
+    if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  noteWin.webContents.on('will-navigate', (event, url) => {
+    const isLocal = url.startsWith('http://localhost:5173') || url.startsWith('http://127.0.0.1:5173') || url.startsWith('file://');
+    if (!isLocal && (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:'))) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  const query = `mode=detached-note&notePath=${encodeURIComponent(relativePath)}`;
+  if (isDev) {
+    noteWin.loadURL(`http://localhost:5173/?${query}#${query}`);
+  } else if (fs.existsSync(distPath)) {
+    noteWin.loadFile(distPath, {
+      query: { mode: 'detached-note', notePath: relativePath },
+      hash: query,
+    });
+  } else {
+    noteWin.loadURL(`http://localhost:5173/?${query}#${query}`);
+  }
+
+  broadcastDetachedNotesList();
+
+  noteWin.on('closed', () => {
+    detachedNoteWindows.delete(relativePath);
+    broadcastDetachedNotesList();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('detached-note-closed', { relativePath });
+    }
+  });
+
+  return { success: true };
+}
+
 // IPC Handlers
-ipcMain.handle('window-minimize', () => {
-  if (mainWindow) mainWindow.minimize();
+ipcMain.handle('window-minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win && !win.isDestroyed()) win.minimize();
 });
 
-ipcMain.handle('window-close', () => {
-  if (mainWindow) mainWindow.close();
+ipcMain.handle('window-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win && !win.isDestroyed()) {
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  }
+});
+
+ipcMain.handle('window-is-maximized', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  return win && !win.isDestroyed() ? win.isMaximized() : false;
+});
+
+ipcMain.handle('window-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win && !win.isDestroyed()) win.close();
 });
 
 ipcMain.handle('window-toggle-mode', (_, targetMode) => {
@@ -357,10 +517,11 @@ ipcMain.handle('window-toggle-mode', (_, targetMode) => {
   return isCompact;
 });
 
-ipcMain.handle('window-set-always-on-top', (_, flag) => {
-  if (mainWindow) {
-    mainWindow.setAlwaysOnTop(Boolean(flag));
-    return mainWindow.isAlwaysOnTop();
+ipcMain.handle('window-set-always-on-top', (event, flag) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win && !win.isDestroyed()) {
+    win.setAlwaysOnTop(Boolean(flag));
+    return win.isAlwaysOnTop();
   }
   return false;
 });
@@ -1153,6 +1314,14 @@ ipcMain.handle('notes-write', async (_, { relativePath, content }) => {
     }
     lastLocalSaveTime = Date.now();
     fs.writeFileSync(safePath, content, 'utf-8');
+
+    // Broadcast update to all other open windows (main window + any detached notes)
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (win.webContents !== _.sender && !win.isDestroyed()) {
+        win.webContents.send('note-content-changed', { relativePath, content });
+      }
+    });
+
     return { success: true, relativePath, fullPath: safePath };
   } catch (err) {
     console.error('Error writing note:', err);
@@ -1202,6 +1371,15 @@ ipcMain.handle('notes-delete', async (_, relativePath) => {
     if (fs.existsSync(safePath)) {
       lastLocalSaveTime = Date.now();
       fs.unlinkSync(safePath);
+
+      // Close detached window if open
+      if (detachedNoteWindows.has(relativePath)) {
+        const win = detachedNoteWindows.get(relativePath);
+        if (win && !win.isDestroyed()) win.close();
+        detachedNoteWindows.delete(relativePath);
+        broadcastDetachedNotesList();
+      }
+
       return { success: true };
     }
     return { success: false, error: 'File does not exist' };
@@ -1240,6 +1418,19 @@ ipcMain.handle('notes-rename', async (_, { oldRelativePath, newTitle, newFolder 
     lastLocalSaveTime = Date.now();
     fs.renameSync(oldSafePath, newSafePath);
     const newRelativePath = path.relative(notesDir, newSafePath).replace(/\\/g, '/');
+
+    // Update detached window map if note was popped out
+    if (detachedNoteWindows.has(oldRelativePath)) {
+      const win = detachedNoteWindows.get(oldRelativePath);
+      detachedNoteWindows.delete(oldRelativePath);
+      detachedNoteWindows.set(newRelativePath, win);
+      if (win && !win.isDestroyed()) {
+        win.setTitle(`${cleanTitle} - Albaqros`);
+        win.webContents.send('note-renamed', { oldRelativePath, newRelativePath, newTitle: cleanTitle });
+      }
+      broadcastDetachedNotesList();
+    }
+
     return { success: true, relativePath: newRelativePath, fileName: finalFileName, fullPath: newSafePath };
   } catch (err) {
     console.error('Error renaming note:', err);
@@ -1277,6 +1468,42 @@ ipcMain.handle('notes-open-folder', async (_, relativePath) => {
     console.error('Error opening notes folder:', err);
     return false;
   }
+});
+
+ipcMain.handle('notes-open-detached', async (_, { relativePath, title }) => {
+  return openDetachedNoteWindow(relativePath, title);
+});
+
+ipcMain.handle('notes-dock-back', async (event, relativePath) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (isCompact) {
+      const currentBounds = mainWindow.getBounds();
+      const currentDisplay = screen.getDisplayMatching(currentBounds);
+      const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = currentDisplay.workArea;
+      isCompact = false;
+      const targetW = Math.min(1240, screenWidth - 100);
+      const targetH = Math.min(840, screenHeight - 80);
+      const targetX = displayX + Math.max(20, Math.floor((screenWidth - targetW) / 2));
+      const targetY = displayY + Math.max(20, Math.floor((screenHeight - targetH) / 2));
+      mainWindow.setResizable(true);
+      mainWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH }, true);
+      mainWindow.webContents.send('window-mode-changed', 'maximized');
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send('note-docked', { relativePath });
+  }
+
+  const noteWin = detachedNoteWindows.get(relativePath);
+  if (noteWin && !noteWin.isDestroyed()) {
+    noteWin.close();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('notes-get-detached', () => {
+  return Array.from(detachedNoteWindows.keys());
 });
 
 // ==========================================

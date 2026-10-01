@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact, VaultInfo } from './types';
 import { StorageService, getTodayString } from './services/storage';
+import { NotesService } from './services/notesService';
 import { processDayRollover } from './services/recurrence';
 import { getEffectiveDayEntry, getEffectiveSubpropertyValues } from './services/propertyInheritance';
 import { TitleBar } from './components/TitleBar';
@@ -23,6 +24,7 @@ export const App: React.FC = () => {
   const [vaultInfo, setVaultInfo] = useState<VaultInfo | null>(null);
   const [isVaultModalOpen, setIsVaultModalOpen] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [dockedNotePath, setDockedNotePath] = useState<string | null>(null);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false);
@@ -84,8 +86,15 @@ export const App: React.FC = () => {
       }
     });
 
+    // Listen for notes docked back to Albaqros to maximize and select note
+    const unsubDocked = NotesService.onNoteDocked(({ relativePath }) => {
+      setIsCompact(false);
+      setDockedNotePath(relativePath);
+    });
+
     return () => {
       if (unsubUpdater) unsubUpdater();
+      if (unsubDocked) unsubDocked();
     };
   }, []);
 
@@ -1140,6 +1149,7 @@ export const App: React.FC = () => {
             currentDate={currentDate}
             data={data}
             entry={currentDayEntry}
+            initialNotePath={dockedNotePath}
             onPrevDay={handlePrevDay}
             onNextDay={handleNextDay}
             onSelectDate={(d) => setCurrentDate(d)}
