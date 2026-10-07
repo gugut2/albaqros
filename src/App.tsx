@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { AppData, AppSettings, DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Subtask, Task, ProjectArtifact, VaultInfo } from './types';
 import { StorageService, getTodayString } from './services/storage';
 import { NotesService } from './services/notesService';
 import { processDayRollover } from './services/recurrence';
 import { getEffectiveDayEntry, getEffectiveSubpropertyValues } from './services/propertyInheritance';
+import { routeAndImportFiles } from './services/fileDropRouter';
 import { TitleBar } from './components/TitleBar';
 import { CompactView } from './components/CompactView';
 import { MaximizedView } from './components/MaximizedView';
@@ -15,6 +16,7 @@ import { MajorTaskModal } from './components/MajorTaskModal';
 import { ProjectArtifactModal } from './components/ProjectArtifactModal';
 import { DailyPropertiesModal } from './components/DailyPropertiesModal';
 import { VaultModal } from './components/VaultModal';
+import { GlobalDropOverlay } from './components/GlobalDropOverlay';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<AppData | null>(null);
@@ -40,23 +42,236 @@ export const App: React.FC = () => {
   const [propertiesModalTab, setPropertiesModalTab] = useState<'properties' | 'reminders'>('reminders');
   const [updateReady, setUpdateReady] = useState<boolean>(false);
 
+  // Global drag and drop library router state
+  const [isGlobalDragOver, setIsGlobalDragOver] = useState<boolean>(false);
+  const [isDropProcessing, setIsDropProcessing] = useState<boolean>(false);
+  const [dropProgress, setDropProgress] = useState<{ current: number; total: number; currentFileName: string } | null>(null);
+  const [dropToast, setDropToast] = useState<{
+    message: string;
+    actionText?: string;
+    onAction?: () => void;
+    isProcessing?: boolean;
+  } | null>(null);
+  const [targetStudioTab, setTargetStudioTab] = useState<'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null>(null);
+
+  // Global drag-and-drop listener to auto-sort 3D & 2D files from Windows Explorer into libraries
+  useEffect(() => {
+    let dragCounter = 0;
+    let safetyTimer: any = null;
+
+    const clearSafetyTimer = () => {
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+    };
+
+    const resetSafetyTimer = () => {
+      clearSafetyTimer();
+      // Auto-dismiss overlay if no drag events occur for 3.5 seconds
+      safetyTimer = setTimeout(() => {
+        dragCounter = 0;
+        setIsGlobalDragOver(false);
+      }, 3500);
+    };
+
+    const handleDragEnter = (e: DragEvent) => {
+      // Only respond to native OS file dragging
+      if (!e.dataTransfer?.types || !Array.from(e.dataTransfer.types).includes('Files')) {
+        return;
+      }
+      e.preventDefault();
+      dragCounter++;
+      if (dragCounter === 1) {
+        setIsGlobalDragOver(true);
+      }
+      resetSafetyTimer();
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types || !Array.from(e.dataTransfer.types).includes('Files')) {
+        return;
+      }
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      resetSafetyTimer();
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      if (!e.dataTransfer?.types || !Array.from(e.dataTransfer.types).includes('Files')) {
+        return;
+      }
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        clearSafetyTimer();
+        setIsGlobalDragOver(false);
+      }
+    };
+
+    const handleDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter = 0;
+      clearSafetyTimer();
+      // Instantly dismiss full-screen drop window so the user is NEVER stuck
+      setIsGlobalDragOver(false);
+
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) {
+        return;
+      }
+
+      const fileCount = files.length;
+      setDropToast({
+        message: `Sorting & saving ${fileCount} file(s) into vault...`,
+        isProcessing: true,
+      });
+
+      try {
+        const summary = await routeAndImportFiles(files, {
+          onProgress: (current, total, currentFileName) => {
+            setDropToast({
+              message: `Saving (${current}/${total}): ${currentFileName}...`,
+              isProcessing: true,
+            });
+          },
+        });
+
+        if (summary.totalSuccess > 0) {
+          const parts: string[] = [];
+          if (summary.imported3D.length > 0) {
+            parts.push(`${summary.imported3D.length} 3D model${summary.imported3D.length > 1 ? 's' : ''} to 3D Library`);
+          }
+          if (summary.imported2D.length > 0) {
+            parts.push(`${summary.imported2D.length} artwork${summary.imported2D.length > 1 ? 's' : ''} to 2D Art Library`);
+          }
+
+          let actionText: string | undefined;
+          let onAction: (() => void) | undefined;
+
+          if (summary.imported3D.length > 0 && summary.imported2D.length === 0) {
+            actionText = 'Open 3D Library';
+            onAction = () => {
+              if (isCompact) {
+                setIsCompact(false);
+                if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
+                  (window as any).electronAPI.toggleWindowMode('maximized');
+                }
+              }
+              setTargetStudioTab('assets');
+              setDropToast(null);
+            };
+          } else if (summary.imported2D.length > 0 && summary.imported3D.length === 0) {
+            actionText = 'Open 2D Library';
+            onAction = () => {
+              if (isCompact) {
+                setIsCompact(false);
+                if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
+                  (window as any).electronAPI.toggleWindowMode('maximized');
+                }
+              }
+              setTargetStudioTab('art2d');
+              setDropToast(null);
+            };
+          } else if (summary.imported3D.length > 0 && summary.imported2D.length > 0) {
+            actionText = 'View 3D Models';
+            onAction = () => {
+              if (isCompact) {
+                setIsCompact(false);
+                if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
+                  (window as any).electronAPI.toggleWindowMode('maximized');
+                }
+              }
+              setTargetStudioTab('assets');
+              setDropToast(null);
+            };
+          }
+
+          setDropToast({
+            message: `✨ Saved ${parts.join(' & ')}!`,
+            actionText,
+            onAction,
+            isProcessing: false,
+          });
+
+          setTimeout(() => {
+            setDropToast((prev) => (prev?.message.startsWith('✨') ? null : prev));
+          }, 8000);
+        } else if (summary.unsupportedNames.length > 0) {
+          setDropToast({
+            message: `⚠️ No recognized 3D (.blend, .obj, .fbx...) or 2D (.kra, .psd, .png...) files recognized in dropped items.`,
+            isProcessing: false,
+          });
+          setTimeout(() => setDropToast(null), 5000);
+        } else {
+          setDropToast(null);
+        }
+      } catch (err: any) {
+        setDropToast({
+          message: `Error importing dropped file: ${err.message}`,
+          isProcessing: false,
+        });
+        setTimeout(() => setDropToast(null), 5000);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        dragCounter = 0;
+        clearSafetyTimer();
+        setIsGlobalDragOver(false);
+      }
+    };
+
+    const handleBlur = () => {
+      dragCounter = 0;
+      clearSafetyTimer();
+      setIsGlobalDragOver(false);
+    };
+
+    // Attach native non-passive listeners to guarantee e.preventDefault() works cleanly
+    window.addEventListener('dragenter', handleDragEnter, { passive: false });
+    window.addEventListener('dragover', handleDragOver, { passive: false });
+    window.addEventListener('dragleave', handleDragLeave, { passive: false });
+    window.addEventListener('drop', handleDrop, { passive: false });
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      clearSafetyTimer();
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [isCompact]);
+
   // Load data on startup and process day rollover
   useEffect(() => {
     async function init() {
       const loaded = await StorageService.load();
       const today = getTodayString();
 
-      // Check day rollover and increment daysMissed for carried over tasks
-      const updatedTasks = processDayRollover(loaded.tasks, loaded.lastOpenedDate || today);
+      // Check day rollover and increment daysMissed for carried over tasks (skip paused projects)
+      const updatedTasks = processDayRollover(loaded.tasks, loaded.lastOpenedDate || today, loaded.majorTasks);
       const updatedData: AppData = {
         ...loaded,
         tasks: updatedTasks,
         lastOpenedDate: today,
       };
 
-      setData(updatedData);
-      setAlwaysOnTop(loaded.settings?.alwaysOnTop || false);
-      setIsCompact(true); // Always open in widget mode on app launch
+      const initialCompact = loaded.settings?.compactMode !== false;
+      setIsCompact(initialCompact);
+      if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
+        try {
+          await (window as any).electronAPI.toggleWindowMode(initialCompact ? 'compact' : 'maximized');
+        } catch (e) {}
+      }
 
       // Load active vault metadata
       const vInfo = await StorageService.getVaultInfo();
@@ -375,7 +590,6 @@ export const App: React.FC = () => {
       id: `task-${Date.now()}`,
       title: title.trim(),
       theme: theme || 'General',
-      energy: 'normal',
       isTopFocus: false,
       completed: false,
       date: dateStr,
@@ -465,12 +679,48 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleTogglePauseMajorTask = (majorTaskId: string) => {
+    updateData((prev) => {
+      const today = getTodayString();
+      let willBePaused = false;
+      const updatedMajorTasks = (prev.majorTasks || []).map((m) => {
+        if (m.id === majorTaskId) {
+          willBePaused = !m.paused;
+          return {
+            ...m,
+            paused: willBePaused,
+          };
+        }
+        return m;
+      });
+
+      // If unpausing (resuming) the project, roll forward any incomplete tasks that were scheduled in the past
+      let updatedTasks = prev.tasks;
+      if (!willBePaused) {
+        updatedTasks = prev.tasks.map((t) => {
+          if (t.majorTaskId === majorTaskId && !t.completed && !t.archived && t.date < today) {
+            return {
+              ...t,
+              date: today,
+            };
+          }
+          return t;
+        });
+      }
+
+      return {
+        ...prev,
+        majorTasks: updatedMajorTasks,
+        tasks: updatedTasks,
+      };
+    });
+  };
+
   const handleAddTaskToMajor = (majorTaskId: string, title: string, theme: string) => {
     const newTask: Task = {
       id: `task-${Date.now()}`,
       title: title.trim(),
       theme: theme || 'General',
-      energy: 'normal',
       isTopFocus: false,
       completed: false,
       date: currentDate,
@@ -560,7 +810,6 @@ export const App: React.FC = () => {
         id: `micro-${Date.now()}-${idx}`,
         title: step,
         theme: original.theme,
-        energy: 'low', // micro steps are made to be low energy!
         isTopFocus: idx === 0,
         completed: false,
         date: currentDate,
@@ -662,14 +911,13 @@ export const App: React.FC = () => {
     setRescueTask(null);
   };
 
-  // --- Journal & Energy Handlers ---
+  // --- Journal Handlers ---
 
   const handleUpdateJournal = (dateStr: string, text: string) => {
     updateData((prev) => {
       const existing = prev.entries[dateStr] || {
         date: dateStr,
         journal: '',
-        energyLevel: 3,
         updatedAt: new Date().toISOString(),
       };
 
@@ -680,29 +928,6 @@ export const App: React.FC = () => {
           [dateStr]: {
             ...existing,
             journal: text,
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      };
-    });
-  };
-
-  const handleUpdateEnergy = (dateStr: string, level: number) => {
-    updateData((prev) => {
-      const existing = prev.entries[dateStr] || {
-        date: dateStr,
-        journal: '',
-        energyLevel: level,
-        updatedAt: new Date().toISOString(),
-      };
-
-      return {
-        ...prev,
-        entries: {
-          ...prev.entries,
-          [dateStr]: {
-            ...existing,
-            energyLevel: level,
             updatedAt: new Date().toISOString(),
           },
         },
@@ -721,7 +946,6 @@ export const App: React.FC = () => {
       const currentEntry = prev.entries[dateStr] || {
         date: dateStr,
         journal: '',
-        energyLevel: 3,
         updatedAt: new Date().toISOString(),
       };
       const currentProps = currentEntry.properties || {};
@@ -752,7 +976,6 @@ export const App: React.FC = () => {
       const currentEntry = prev.entries[dateStr] || {
         date: dateStr,
         journal: '',
-        energyLevel: 3,
         updatedAt: new Date().toISOString(),
       };
 
@@ -903,7 +1126,6 @@ export const App: React.FC = () => {
       const currentEntry = prev.entries[dateStr] || {
         date: dateStr,
         journal: '',
-        energyLevel: 3,
         updatedAt: new Date().toISOString(),
       };
       const currentReminders = currentEntry.remindersCompleted || {};
@@ -1005,11 +1227,6 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
       await (window as any).electronAPI.toggleWindowMode(nextMode ? 'compact' : 'maximized');
     }
-
-    updateData((prev) => ({
-      ...prev,
-      settings: { ...prev.settings, compactMode: nextMode },
-    }));
   };
 
   const handleToggleAlwaysOnTop = async () => {
@@ -1123,7 +1340,6 @@ export const App: React.FC = () => {
               setIsCreateOpen(true);
             }}
             onUpdateJournal={handleUpdateJournal}
-            onUpdateEnergy={handleUpdateEnergy}
             onToggleSubtask={handleToggleSubtask}
             onAddSubtask={handleAddSubtask}
             onDeleteSubtask={handleDeleteSubtask}
@@ -1168,7 +1384,6 @@ export const App: React.FC = () => {
               setIsCreateOpen(true);
             }}
             onUpdateJournal={handleUpdateJournal}
-            onUpdateEnergy={handleUpdateEnergy}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenCreateMajorTask={() => {
               setEditingMajorTask(null);
@@ -1180,6 +1395,7 @@ export const App: React.FC = () => {
             }}
             onDeleteMajorTask={handleDeleteMajorTask}
             onToggleCompleteMajorTask={handleToggleCompleteMajorTask}
+            onTogglePauseMajorTask={handleTogglePauseMajorTask}
             onAddTaskToMajor={handleAddTaskToMajor}
             onToggleSubtask={handleToggleSubtask}
             onAddSubtask={handleAddSubtask}
@@ -1199,6 +1415,12 @@ export const App: React.FC = () => {
             onOpenManageReminders={() => {
               setPropertiesModalTab('reminders');
               setIsPropertiesModalOpen(true);
+            }}
+            targetTab={targetStudioTab}
+            onActiveTabChange={(tab) => {
+              if (targetStudioTab === tab) {
+                setTargetStudioTab(null);
+              }
             }}
           />
         )}
@@ -1271,6 +1493,12 @@ export const App: React.FC = () => {
         onUpdateSettings={(newSettings) =>
           updateData((prev) => ({ ...prev, settings: newSettings }))
         }
+        onSwitchWindowMode={async (targetMode) => {
+          setIsCompact(targetMode === 'compact');
+          if (typeof window !== 'undefined' && (window as any).electronAPI?.toggleWindowMode) {
+            await (window as any).electronAPI.toggleWindowMode(targetMode);
+          }
+        }}
         data={data}
         vaultInfo={vaultInfo}
         onOpenVaultModal={() => {
@@ -1326,6 +1554,84 @@ export const App: React.FC = () => {
           {syncNotice}
         </div>
       )}
+
+      {/* Media Drop Result Toast Notification */}
+      {dropToast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            backgroundColor: '#161b26',
+            border: '1px solid rgba(129, 140, 248, 0.45)',
+            color: '#f8fafc',
+            padding: '12px 18px',
+            borderRadius: '12px',
+            fontSize: '0.85rem',
+            fontWeight: 500,
+            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.25)',
+            zIndex: 100000,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            animation: 'fadeIn 0.25s ease',
+            maxWidth: '460px',
+          }}
+        >
+          {dropToast.isProcessing && (
+            <div
+              style={{
+                width: '16px',
+                height: '16px',
+                borderRadius: '50%',
+                border: '2px solid rgba(129, 140, 248, 0.3)',
+                borderTopColor: '#818cf8',
+                animation: 'spin 0.8s linear infinite',
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <div style={{ flex: 1, lineHeight: 1.4 }}>{dropToast.message}</div>
+          {dropToast.actionText && dropToast.onAction && (
+            <button
+              type="button"
+              onClick={dropToast.onAction}
+              style={{
+                backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                border: '1px solid #6366f1',
+                color: '#e0e7ff',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {dropToast.actionText}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setDropToast(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '2px 4px',
+              fontSize: '1rem',
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Global Explorer Drag and Drop Feedback Overlay */}
+      <GlobalDropOverlay isVisible={isGlobalDragOver} />
     </div>
   );
 };

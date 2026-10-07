@@ -26,7 +26,6 @@ interface HistoryViewProps {
   data: AppData;
   onSelectDate: (dateStr: string) => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
-  onUpdateEnergy: (dateStr: string, level: number) => void;
   onToggleComplete: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
   onEditTask?: (task: Task) => void;
@@ -43,7 +42,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   data,
   onSelectDate,
   onUpdateJournal,
-  onUpdateEnergy,
   onToggleComplete,
   onDeleteTask,
   onEditTask,
@@ -71,15 +69,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [newTaskTitle, setNewTaskTitle] = useState<string>('');
   const [newTaskTheme, setNewTaskTheme] = useState<string>('Work');
 
-  const dayTasks = data.tasks.filter((t) => t.date === selectedDate && !t.archived);
+  const pausedMajorIds = useMemo(
+    () => new Set((data.majorTasks || []).filter((m) => m.paused).map((m) => m.id)),
+    [data.majorTasks]
+  );
+  const dayTasks = data.tasks.filter(
+    (t) => t.date === selectedDate && !t.archived && (!t.majorTaskId || !pausedMajorIds.has(t.majorTaskId) || t.completed)
+  );
   const dayEntry = useMemo(
     () => getEffectiveDayEntry(data.entries, selectedDate, data.dailyProperties || []),
     [data.entries, selectedDate, data.dailyProperties]
   );
 
   const completedCount = dayTasks.filter((t) => t.completed).length;
-  const currentEnergy = dayEntry?.energyLevel || 3;
-  const energyLabels = ['Drained', 'Low', 'Balanced', 'High Focus', 'Peak Flow'];
 
   const handleStartEditTask = (task: Task) => {
     setEditingTaskId(task.id);
@@ -804,32 +806,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   >
                     <span>• Bullet</span>
                   </button>
-                </div>
-
-                {/* Interactive Energy Level */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    Energy: <strong style={{ color: '#f59e0b' }}>{energyLabels[currentEnergy - 1]}</strong>
-                  </span>
-                  <div style={{ display: 'flex', gap: '3px' }}>
-                    {[1, 2, 3, 4, 5].map((lvl) => (
-                      <button
-                        key={lvl}
-                        type="button"
-                        onClick={() => onUpdateEnergy(selectedDate, lvl)}
-                        title={`Energy ${lvl}/5`}
-                        style={{
-                          width: '14px',
-                          height: '14px',
-                          borderRadius: '3px',
-                          border: 'none',
-                          backgroundColor: lvl <= currentEnergy ? '#f59e0b' : 'rgba(255, 255, 255, 0.1)',
-                          cursor: 'pointer',
-                          opacity: lvl <= currentEnergy ? 1 : 0.4,
-                        }}
-                      />
-                    ))}
-                  </div>
                 </div>
               </div>
 

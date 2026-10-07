@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Filter, Zap, Coffee, CheckCircle2, AlertTriangle, Pill, ChevronDown, ChevronUp, Activity } from 'lucide-react';
-import { DailyPropertyDefinition, DailyReminder, DayEntry, EnergyLevel, MajorTask, Task } from '../types';
+import React, { useState, useMemo } from 'react';
+import { ChevronLeft, ChevronRight, Plus, Filter, CheckCircle2, AlertTriangle, Pill, ChevronDown, ChevronUp, Activity } from 'lucide-react';
+import { DailyPropertyDefinition, DailyReminder, DayEntry, MajorTask, Task } from '../types';
 import { TaskItem } from './TaskItem';
 import { JournalSection } from './JournalSection';
 import { DailyRemindersCard } from './DailyRemindersCard';
@@ -26,7 +26,6 @@ interface CompactViewProps {
   onToggleMultiDay?: (taskId: string) => void;
   onOpenCreateTask: () => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
-  onUpdateEnergy: (dateStr: string, level: number) => void;
   onToggleSubtask?: (taskId: string, subtaskId: string) => void;
   onAddSubtask?: (taskId: string, title: string) => void;
   onDeleteSubtask?: (taskId: string, subtaskId: string) => void;
@@ -59,7 +58,6 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onToggleMultiDay,
   onOpenCreateTask,
   onUpdateJournal,
-  onUpdateEnergy,
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
@@ -72,19 +70,20 @@ export const CompactView: React.FC<CompactViewProps> = ({
   onOpenManageReminders,
   onViewAnalytics,
 }) => {
-  const [energyFilter, setEnergyFilter] = useState<'all' | 'high' | 'low'>('all');
   const [isRoutineExpanded, setIsRoutineExpanded] = useState<boolean>(false);
 
   const isToday = currentDate === getTodayString();
   const dateLabel = formatDateLabel(currentDate);
 
-  // Filter tasks for current date and energy filter
-  const dayTasks = tasks.filter((t) => t.date === currentDate && !t.archived);
-  const filteredTasks = dayTasks.filter((t) => {
-    if (energyFilter === 'high') return t.energy === 'high';
-    if (energyFilter === 'low') return t.energy === 'low';
-    return true;
-  });
+  // Filter tasks for current date, excluding tasks from paused projects
+  const pausedMajorIds = useMemo(
+    () => new Set((majorTasks || []).filter((m) => m.paused).map((m) => m.id)),
+    [majorTasks]
+  );
+  const dayTasks = tasks.filter(
+    (t) => t.date === currentDate && !t.archived && (!t.majorTaskId || !pausedMajorIds.has(t.majorTaskId))
+  );
+  const filteredTasks = dayTasks;
 
   const totalTasks = dayTasks.length;
   const completedTasks = dayTasks.filter((t) => t.completed).length;
@@ -232,60 +231,10 @@ export const CompactView: React.FC<CompactViewProps> = ({
         )}
       </div>
 
-      {/* Energy Quick Filters & Add Task Header */}
+      {/* Daily Tasks Header & Add Task */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <button
-            type="button"
-            onClick={() => setEnergyFilter('all')}
-            className={`badge ${energyFilter === 'all' ? 'badge-energy-high' : ''}`}
-            style={{
-              cursor: 'pointer',
-              border: energyFilter === 'all' ? '1px solid var(--accent-indigo)' : '1px solid var(--border-subtle)',
-              backgroundColor: energyFilter === 'all' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-              color: energyFilter === 'all' ? '#a5b4fc' : 'var(--text-muted)',
-              fontSize: '0.7rem',
-              padding: '2px 8px',
-            }}
-          >
-            All ({dayTasks.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setEnergyFilter('high')}
-            style={{
-              cursor: 'pointer',
-              border: energyFilter === 'high' ? '1px solid #ef4444' : '1px solid var(--border-subtle)',
-              backgroundColor: energyFilter === 'high' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-              color: energyFilter === 'high' ? '#f87171' : 'var(--text-muted)',
-              fontSize: '0.7rem',
-              padding: '2px 8px',
-              borderRadius: '999px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Zap size={10} /> Focus ⚡
-          </button>
-          <button
-            type="button"
-            onClick={() => setEnergyFilter('low')}
-            style={{
-              cursor: 'pointer',
-              border: energyFilter === 'low' ? '1px solid #10b981' : '1px solid var(--border-subtle)',
-              backgroundColor: energyFilter === 'low' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-              color: energyFilter === 'low' ? '#34d399' : 'var(--text-muted)',
-              fontSize: '0.7rem',
-              padding: '2px 8px',
-              borderRadius: '999px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '3px',
-            }}
-          >
-            <Coffee size={10} /> Light ☕
-          </button>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+          Daily Tasks ({completedTasks}/{totalTasks})
         </div>
 
         <button
@@ -394,7 +343,6 @@ export const CompactView: React.FC<CompactViewProps> = ({
         entry={entry}
         dateStr={currentDate}
         onUpdateJournal={onUpdateJournal}
-        onUpdateEnergy={onUpdateEnergy}
         isCompact={true}
       />
     </div>

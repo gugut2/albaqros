@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Target,
   Plus,
@@ -17,6 +17,8 @@ import {
   FileText,
   Layers,
   CheckSquare,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { MajorTask, Task, ProjectArtifact } from '../types';
 import { calculateMajorTaskProgress, calculateCadenceStatus, formatFileSize } from '../services/majorTasks';
@@ -31,6 +33,7 @@ interface MajorTasksViewProps {
   onEditMajorTask: (majorTask: MajorTask) => void;
   onDeleteMajorTask: (majorTaskId: string) => void;
   onToggleCompleteMajorTask: (majorTaskId: string) => void;
+  onTogglePauseMajorTask: (majorTaskId: string) => void;
   onToggleCompleteTask: (taskId: string) => void;
   onEditTask?: (task: Task) => void;
   onAddTaskToMajor: (majorTaskId: string, title: string, theme: string) => void;
@@ -47,6 +50,7 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
   onEditMajorTask,
   onDeleteMajorTask,
   onToggleCompleteMajorTask,
+  onTogglePauseMajorTask,
   onToggleCompleteTask,
   onEditTask,
   onAddTaskToMajor,
@@ -57,6 +61,18 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
   const [expandedMajorId, setExpandedMajorId] = useState<string | null>(majorTasks[0]?.id || null);
   const [activeSubTab, setActiveSubTab] = useState<{ [majorId: string]: 'tasks' | 'evolution' }>({});
   const [newTaskTitle, setNewTaskTitle] = useState<{ [majorId: string]: string }>({});
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'paused' | 'completed'>('all');
+
+  const activeCount = majorTasks.filter((m) => !m.completed && !m.paused).length;
+  const pausedCount = majorTasks.filter((m) => m.paused).length;
+  const completedCount = majorTasks.filter((m) => m.completed).length;
+
+  const displayedMajorTasks = majorTasks.filter((m) => {
+    if (statusFilter === 'active') return !m.completed && !m.paused;
+    if (statusFilter === 'paused') return m.paused;
+    if (statusFilter === 'completed') return m.completed;
+    return true;
+  });
 
   const handleQuickAddTask = (majorTask: MajorTask) => {
     const text = (newTaskTitle[majorTask.id] || '').trim();
@@ -99,14 +115,48 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
         </button>
       </div>
 
+      {/* Subheader Toolbar: Status Filters & Counts */}
+      {majorTasks.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {[
+              { id: 'all', label: `All (${majorTasks.length})` },
+              { id: 'active', label: `Active (${activeCount})` },
+              { id: 'paused', label: `Paused (${pausedCount})` },
+              { id: 'completed', label: `Completed (${completedCount})` },
+            ].map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setStatusFilter(chip.id as any)}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.75rem',
+                  fontWeight: statusFilter === chip.id ? 600 : 500,
+                  backgroundColor: statusFilter === chip.id ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                  border: statusFilter === chip.id ? '1px solid var(--accent-indigo)' : '1px solid var(--border-subtle)',
+                  color: statusFilter === chip.id ? '#ffffff' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Grid / List of Major Tasks */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        {majorTasks.map((major) => {
+        {displayedMajorTasks.map((major) => {
           const progress = calculateMajorTaskProgress(major, allTasks);
           const cadence = calculateCadenceStatus(major);
           const currentTab = activeSubTab[major.id] || 'tasks';
           const isExpanded = expandedMajorId === major.id;
           const isFinished = major.completed || progress.percentage === 100;
+          const isPaused = Boolean(major.paused);
 
           return (
             <div
@@ -115,8 +165,16 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
               style={{
                 padding: '20px',
                 backgroundColor: 'rgba(18, 22, 30, 0.75)',
-                border: isFinished ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-medium)',
-                boxShadow: isFinished ? '0 0 20px rgba(16, 185, 129, 0.1)' : 'var(--shadow-card)',
+                border: isPaused
+                  ? '1px solid rgba(245, 158, 11, 0.35)'
+                  : isFinished
+                  ? '1px solid rgba(16, 185, 129, 0.3)'
+                  : '1px solid var(--border-medium)',
+                boxShadow: isPaused
+                  ? '0 0 20px rgba(245, 158, 11, 0.08)'
+                  : isFinished
+                  ? '0 0 20px rgba(16, 185, 129, 0.1)'
+                  : 'var(--shadow-card)',
                 transition: 'all 0.2s ease',
               }}
             >
@@ -158,23 +216,44 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                         gap: '4px',
                         fontSize: '0.725rem',
                         fontWeight: 600,
-                        color:
-                          cadence.status === 'due_today'
-                            ? '#fbbf24'
-                            : cadence.status === 'overdue'
-                            ? '#f87171'
-                            : '#818cf8',
-                        backgroundColor:
-                          cadence.status === 'due_today'
-                            ? 'rgba(245, 158, 11, 0.15)'
-                            : cadence.status === 'overdue'
-                            ? 'rgba(248, 113, 113, 0.15)'
-                            : 'rgba(99, 102, 241, 0.12)',
+                        color: isPaused
+                          ? '#f59e0b'
+                          : cadence.status === 'due_today'
+                          ? '#fbbf24'
+                          : cadence.status === 'overdue'
+                          ? '#f87171'
+                          : '#818cf8',
+                        backgroundColor: isPaused
+                          ? 'rgba(245, 158, 11, 0.12)'
+                          : cadence.status === 'due_today'
+                          ? 'rgba(245, 158, 11, 0.15)'
+                          : cadence.status === 'overdue'
+                          ? 'rgba(248, 113, 113, 0.15)'
+                          : 'rgba(99, 102, 241, 0.12)',
                         padding: '2px 8px',
                         borderRadius: '4px',
                       }}
                     >
                       <Clock size={11} /> {cadence.badgeText}
+                    </span>
+                  )}
+
+                  {isPaused && (
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        color: '#fbbf24',
+                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      <Pause size={11} /> Paused
                     </span>
                   )}
 
@@ -197,8 +276,20 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                   )}
                 </div>
 
-                {/* Edit / Delete / Complete Controls */}
+                {/* Edit / Delete / Complete / Pause Controls */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => onTogglePauseMajorTask(major.id)}
+                    className={`btn-icon ${isPaused ? 'active' : ''}`}
+                    title={isPaused ? 'Resume project (show tasks in dailies)' : 'Pause project (hide tasks from dailies)'}
+                    style={{
+                      color: isPaused ? '#f59e0b' : 'var(--text-muted)',
+                      backgroundColor: isPaused ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                    }}
+                  >
+                    {isPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} />}
+                  </button>
                   <button
                     type="button"
                     onClick={() => onToggleCompleteMajorTask(major.id)}
@@ -227,6 +318,49 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Paused Information Banner */}
+              {isPaused && (
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    fontSize: '0.775rem',
+                    color: '#fbbf24',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Pause size={13} />
+                    <span>Project is paused — its tasks won't appear in the dailies.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onTogglePauseMajorTask(major.id)}
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: '4px',
+                      fontSize: '0.725rem',
+                      fontWeight: 600,
+                      backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                      border: '1px solid rgba(245, 158, 11, 0.4)',
+                      color: '#fef3c7',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <Play size={11} fill="currentColor" /> Resume Project
+                  </button>
+                </div>
+              )}
 
               {/* Title & Description */}
               <div style={{ marginTop: '8px' }}>
@@ -573,8 +707,6 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
                                 </span>
                               )}
                               <span>{formatDateLabel(t.date)}</span>
-                              {t.energy === 'high' && <span style={{ color: '#f87171' }}>⚡</span>}
-                              {t.energy === 'low' && <span style={{ color: '#34d399' }}>☕</span>}
                               {onEditTask && (
                                 <button
                                   type="button"
@@ -613,6 +745,27 @@ export const MajorTasksView: React.FC<MajorTasksViewProps> = ({
             </div>
           );
         })}
+
+        {majorTasks.length > 0 && displayedMajorTasks.length === 0 && (
+          <div
+            style={{
+              padding: '40px 20px',
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              fontSize: '0.85rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--border-subtle)',
+            }}
+          >
+            No {statusFilter} projects found.
+            <div style={{ marginTop: '10px' }}>
+              <button type="button" onClick={() => setStatusFilter('all')} className="btn-secondary">
+                View all projects
+              </button>
+            </div>
+          </div>
+        )}
 
         {majorTasks.length === 0 && (
           <div

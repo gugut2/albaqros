@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, X, Calendar, Plus, Check, Sparkles, Clock } from 'lucide-react';
+import { Target, X, Calendar, Plus, Check, Sparkles, Clock, Pause } from 'lucide-react';
 import { MajorTask } from '../types';
 
 interface MajorTaskModalProps {
@@ -22,6 +22,7 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
   const [theme, setTheme] = useState(themes[0] || 'Work');
   const [targetDate, setTargetDate] = useState('');
   const [cadenceDays, setCadenceDays] = useState<number | undefined>(undefined);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     if (editingMajorTask) {
@@ -30,12 +31,14 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
       setTheme(editingMajorTask.theme || themes[0] || 'Work');
       setTargetDate(editingMajorTask.targetDate || '');
       setCadenceDays(editingMajorTask.cadenceDays);
+      setPaused(Boolean(editingMajorTask.paused));
     } else {
       setTitle('');
       setDescription('');
       setTheme(themes[0] || 'Work');
       setTargetDate('');
       setCadenceDays(undefined);
+      setPaused(false);
     }
   }, [editingMajorTask, isOpen, themes]);
 
@@ -52,6 +55,7 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
         theme,
         targetDate: targetDate || undefined,
         cadenceDays: cadenceDays && cadenceDays > 0 ? cadenceDays : undefined,
+        paused: paused || undefined,
       },
       editingMajorTask?.id
     );
@@ -300,6 +304,48 @@ export const MajorTaskModal: React.FC<MajorTaskModalProps> = ({
                 })}
               </div>
             </div>
+          </div>
+
+          {/* Pause Project Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px',
+              backgroundColor: paused ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+              borderRadius: 'var(--radius-md)',
+              border: paused ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid var(--border-subtle)',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onClick={() => setPaused(!paused)}
+          >
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.825rem',
+                  fontWeight: 600,
+                  color: paused ? '#fbbf24' : 'var(--text-primary)',
+                }}
+              >
+                <Pause size={14} />
+                Put Project on Pause
+              </div>
+              <div style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                If paused, linked tasks will stop appearing in the dailies
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={paused}
+              onChange={(e) => setPaused(e.target.checked)}
+              style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#f59e0b' }}
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
 
           {/* Action Buttons */}

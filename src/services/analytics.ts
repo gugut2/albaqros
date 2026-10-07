@@ -14,25 +14,15 @@ export interface DayVelocity {
   completed: number;
   total: number;
   journalWords: number;
-  energyLevel: number;
-}
-
-export interface EnergyDistribution {
-  name: string;
-  value: number;
-  color: string;
 }
 
 export interface AnalyticsSummary {
   currentStreak: number;
   totalCompleted: number;
   completionRate: number;
-  highEnergyCount: number;
-  lowEnergyCount: number;
   themeStats: ThemeStat[];
   recentVelocity: DayVelocity[]; // Last 7 or 14 days
   monthlyVelocity: DayVelocity[]; // Last 30 days
-  energyDistribution: EnergyDistribution[];
   staleTasksCount: number;
 }
 
@@ -80,18 +70,7 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
   const totalCompleted = completedTasks.length;
   const completionRate = totalTasks > 0 ? Math.round((totalCompleted / totalTasks) * 100) : 0;
 
-  // 2. Energy counts
-  const highEnergyCount = completedTasks.filter((t) => t.energy === 'high').length;
-  const lowEnergyCount = completedTasks.filter((t) => t.energy === 'low').length;
-  const normalEnergyCount = completedTasks.filter((t) => t.energy === 'normal').length;
-
-  const energyDistribution: EnergyDistribution[] = [
-    { name: 'High Focus (⚡)', value: highEnergyCount, color: '#EF4444' },
-    { name: 'Low Energy (☕)', value: lowEnergyCount, color: '#10B981' },
-    { name: 'Standard', value: normalEnergyCount, color: '#6366F1' },
-  ].filter((item) => item.value > 0);
-
-  // 3. Theme Breakdown
+  // 2. Theme Breakdown
   const themeMap = new Map<string, { total: number; completed: number }>();
   validTasks.forEach((t) => {
     const themeName = t.theme || 'General';
@@ -109,7 +88,7 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
     color: getThemeColor(theme),
   }));
 
-  // 4. Day-by-day velocity
+  // 3. Day-by-day velocity
   const now = new Date();
   const recentVelocity: DayVelocity[] = [];
   const monthlyVelocity: DayVelocity[] = [];
@@ -125,7 +104,6 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
 
     const entry = entries[dateStr];
     const words = entry?.journal ? entry.journal.trim().split(/\s+/).filter(Boolean).length : 0;
-    const energy = entry?.energyLevel || 3;
 
     recentVelocity.push({
       date: dateStr,
@@ -133,7 +111,6 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
       completed: dayCompleted,
       total: dayTasks.length,
       journalWords: words,
-      energyLevel: energy,
     });
   }
 
@@ -148,7 +125,6 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
     const dayCompleted = dayTasks.filter((t) => t.completed).length;
     const entry = entries[dateStr];
     const words = entry?.journal ? entry.journal.trim().split(/\s+/).filter(Boolean).length : 0;
-    const energy = entry?.energyLevel || 3;
 
     monthlyVelocity.push({
       date: dateStr,
@@ -156,11 +132,10 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
       completed: dayCompleted,
       total: dayTasks.length,
       journalWords: words,
-      energyLevel: energy,
     });
   }
 
-  // 5. Streak calculation (consecutive days with at least 1 completed task)
+  // 4. Streak calculation (consecutive days with at least 1 completed task)
   let streak = 0;
   for (let i = 0; i < 365; i++) {
     const d = new Date(now);
@@ -178,19 +153,16 @@ export function calculateAnalytics(data: AppData, rangeDays = 14): AnalyticsSumm
     }
   }
 
-  // 6. Stale tasks count
+  // 5. Stale tasks count
   const staleTasksCount = validTasks.filter((t) => !t.completed && (t.daysMissed || 0) >= 2).length;
 
   return {
     currentStreak: streak,
     totalCompleted,
     completionRate,
-    highEnergyCount,
-    lowEnergyCount,
     themeStats,
     recentVelocity,
     monthlyVelocity,
-    energyDistribution,
     staleTasksCount,
   };
 }

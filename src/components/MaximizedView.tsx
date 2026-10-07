@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   CheckSquare,
   BarChart2,
@@ -54,12 +54,12 @@ interface MaximizedViewProps {
   onToggleMultiDay?: (taskId: string) => void;
   onOpenCreateTask: () => void;
   onUpdateJournal: (dateStr: string, text: string) => void;
-  onUpdateEnergy: (dateStr: string, level: number) => void;
   onOpenSettings: () => void;
   onOpenCreateMajorTask?: () => void;
   onEditMajorTask?: (majorTask: MajorTask) => void;
   onDeleteMajorTask?: (majorTaskId: string) => void;
   onToggleCompleteMajorTask?: (majorTaskId: string) => void;
+  onTogglePauseMajorTask?: (majorTaskId: string) => void;
   onAddTaskToMajor?: (majorTaskId: string, title: string, theme: string) => void;
   onToggleSubtask?: (taskId: string, subtaskId: string) => void;
   onAddSubtask?: (taskId: string, title: string) => void;
@@ -75,6 +75,8 @@ interface MaximizedViewProps {
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
   initialNotePath?: string | null;
+  targetTab?: 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null;
+  onActiveTabChange?: (tab: 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring') => void;
 }
 
 type StudioTab = 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
@@ -98,12 +100,12 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onToggleMultiDay,
   onOpenCreateTask,
   onUpdateJournal,
-  onUpdateEnergy,
   onOpenSettings,
   onOpenCreateMajorTask,
   onEditMajorTask,
   onDeleteMajorTask,
   onToggleCompleteMajorTask,
+  onTogglePauseMajorTask,
   onAddTaskToMajor,
   onToggleSubtask,
   onAddSubtask,
@@ -119,8 +121,15 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   onOpenManageProperties,
   onOpenManageReminders,
   initialNotePath,
+  targetTab,
+  onActiveTabChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<StudioTab>('today');
+  const [activeTab, setActiveTabState] = useState<StudioTab>('today');
+
+  const setActiveTab = (tab: StudioTab) => {
+    setActiveTabState(tab);
+    onActiveTabChange?.(tab);
+  };
 
   // Auto-switch to notes tab when a docked note is requested
   useEffect(() => {
@@ -128,6 +137,13 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
       setActiveTab('notes');
     }
   }, [initialNotePath]);
+
+  // Switch to targetTab if externally triggered
+  useEffect(() => {
+    if (targetTab) {
+      setActiveTab(targetTab);
+    }
+  }, [targetTab]);
   const [selectedTheme, setSelectedTheme] = useState<string>('All');
   const [analyticsPropertyId, setAnalyticsPropertyId] = useState<string | undefined>(undefined);
 
@@ -153,8 +169,14 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   const isToday = currentDate === getTodayString();
   const dateLabel = formatDateLabel(currentDate);
 
-  // Filter tasks for current date
-  const dayTasks = data.tasks.filter((t: Task) => t.date === currentDate && !t.archived);
+  // Filter tasks for current date, excluding tasks from paused projects
+  const pausedMajorIds = useMemo(
+    () => new Set((data.majorTasks || []).filter((m: MajorTask) => m.paused).map((m: MajorTask) => m.id)),
+    [data.majorTasks]
+  );
+  const dayTasks = data.tasks.filter(
+    (t: Task) => t.date === currentDate && !t.archived && (!t.majorTaskId || !pausedMajorIds.has(t.majorTaskId))
+  );
   const themes = [
     'All',
     ...Array.from(new Set([...(data.customThemes || ['Work', 'Health', 'Chores', 'Personal']), ...dayTasks.map((t: Task) => t.theme)].filter(Boolean))),
@@ -688,7 +710,6 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                   entry={entry}
                   dateStr={currentDate}
                   onUpdateJournal={onUpdateJournal}
-                  onUpdateEnergy={onUpdateEnergy}
                   isCompact={false}
                 />
               </div>
@@ -706,6 +727,7 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             onEditMajorTask={onEditMajorTask || (() => {})}
             onDeleteMajorTask={onDeleteMajorTask || (() => {})}
             onToggleCompleteMajorTask={onToggleCompleteMajorTask || (() => {})}
+            onTogglePauseMajorTask={onTogglePauseMajorTask || (() => {})}
             onToggleCompleteTask={onToggleComplete}
             onEditTask={onEditTask}
             onAddTaskToMajor={onAddTaskToMajor || (() => {})}
@@ -730,7 +752,6 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             data={data}
             onSelectDate={onSelectDate}
             onUpdateJournal={onUpdateJournal}
-            onUpdateEnergy={onUpdateEnergy}
             onToggleComplete={onToggleComplete}
             onDeleteTask={onDeleteTask}
             onEditTask={onEditTask}
@@ -807,9 +828,6 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span className="badge badge-energy-low">
-                      {t.energy === 'high' ? '⚡ High Focus' : '☕ Light Chore'}
-                    </span>
                     {onEditTask && (
                       <button
                         type="button"

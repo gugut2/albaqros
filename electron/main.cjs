@@ -235,16 +235,46 @@ function setupTray() {
   }
 }
 
+function getInitialWindowCompactPreference() {
+  try {
+    const dataPath = getActiveDataFilePath();
+    if (fs.existsSync(dataPath)) {
+      const content = fs.readFileSync(dataPath, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed && parsed.settings && parsed.settings.compactMode === false) {
+        return false;
+      }
+    }
+  } catch (err) {
+    console.warn('[Electron] Could not read compactMode preference on startup:', err);
+  }
+  return true;
+}
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
   const iconPath = path.join(__dirname, '../assets/icon.png');
 
+  const startAsCompact = getInitialWindowCompactPreference();
+  isCompact = startAsCompact;
+
+  const targetW = startAsCompact ? 420 : Math.min(1240, screenWidth - 100);
+  const targetH = startAsCompact ? 680 : Math.min(840, screenHeight - 80);
+  const targetX = startAsCompact
+    ? screenWidth - 440
+    : Math.max(20, Math.floor((screenWidth - targetW) / 2));
+  const targetY = startAsCompact
+    ? Math.max(40, Math.floor((screenHeight - 680) / 2))
+    : Math.max(20, Math.floor((screenHeight - targetH) / 2));
+
   mainWindow = new BrowserWindow({
     title: 'Albaqros',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
-    width: 420,
-    height: 680,
+    width: targetW,
+    height: targetH,
+    x: targetX,
+    y: targetY,
     minWidth: 380,
     minHeight: 550,
     frame: false,
@@ -260,9 +290,7 @@ function createWindow() {
     },
   });
 
-  // Start in compact mode at the right side of the screen
-  isCompact = true;
-  mainWindow.setPosition(screenWidth - 440, Math.max(40, Math.floor((screenHeight - 680) / 2)));
+  mainWindow.setPosition(targetX, targetY);
 
   const distPath = path.join(__dirname, '../dist/index.html');
   const isDev = !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL || process.env.NODE_ENV === 'development');
@@ -906,16 +934,109 @@ ipcMain.handle('get-storage-info', () => {
 });
 
 // Auto-Launch setting for Windows
+function getTargetExecutablePath() {
+  if (app.isPackaged) {
+    return process.execPath;
+  }
+  if (process.platform === 'win32') {
+    const candidatePaths = [
+      path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Albaqros', 'Albaqros.exe'),
+      path.join(process.env['LOCALAPPDATA'] || '', 'Programs', 'Albaqros', 'Albaqros.exe'),
+      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Albaqros', 'Albaqros.exe'),
+    ];
+    for (const candidate of candidatePaths) {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function sanitizeStartupRegistry() {
+  if (process.platform !== 'win32') return;
+  try {
+    // If dev electron.exe is registered as a startup item, remove it
+    if (!app.isPackaged) {
+      const devSettings = app.getLoginItemSettings({ path: process.execPath });
+      if (devSettings.openAtLogin) {
+        console.log('[Auto-Launch] Cleaning up dev electron.exe from login items');
+        app.setLoginItemSettings({
+          openAtLogin: false,
+          path: process.execPath,
+        });
+      }
+    }
+
+    // Check if the registry Run key points to a node_modules electron.exe
+    const { execSync } = require('child_process');
+    try {
+      const query = execSync('reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v com.albaqros.app', {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (
+        query &&
+        (query.toLowerCase().includes('node_modules') ||
+          (query.toLowerCase().includes('electron.exe') && !query.toLowerCase().includes('albaqros.exe')))
+      ) {
+        console.warn('[Auto-Launch] Detected invalid electron dev executable in startup registry. Repairing...');
+        const validAppPath = getTargetExecutablePath();
+        if (validAppPath && fs.existsSync(validAppPath)) {
+          execSync(
+            `reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v com.albaqros.app /t REG_SZ /d "\\"${validAppPath}\\"" /f`,
+            { stdio: 'ignore' }
+          );
+          console.log('[Auto-Launch] Repaired startup registry to point to:', validAppPath);
+        } else {
+          execSync('reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v com.albaqros.app /f', {
+            stdio: 'ignore',
+          });
+          console.log('[Auto-Launch] Removed broken startup registry entry.');
+        }
+      }
+    } catch (_) {
+      // Key may not exist, ignore
+    }
+  } catch (err) {
+    console.error('[Auto-Launch] Failed to sanitize startup registry:', err);
+  }
+}
+
 ipcMain.handle('set-auto-launch', (_, enable) => {
-  app.setLoginItemSettings({
-    openAtLogin: Boolean(enable),
-    path: process.execPath,
-  });
-  return app.getLoginItemSettings().openAtLogin;
+  const targetPath = getTargetExecutablePath();
+  if (enable) {
+    if (!targetPath) {
+      console.warn('[Auto-Launch] Auto-launch cannot be enabled in development mode without an installed Albaqros binary.');
+      return false;
+    }
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: targetPath,
+    });
+  } else {
+    if (targetPath) {
+      app.setLoginItemSettings({
+        openAtLogin: false,
+        path: targetPath,
+      });
+    }
+    if (!app.isPackaged) {
+      app.setLoginItemSettings({
+        openAtLogin: false,
+        path: process.execPath,
+      });
+    }
+  }
+  return targetPath ? app.getLoginItemSettings({ path: targetPath }).openAtLogin : false;
 });
 
 ipcMain.handle('get-auto-launch', () => {
-  return app.getLoginItemSettings().openAtLogin;
+  const targetPath = getTargetExecutablePath();
+  if (!targetPath) {
+    return false;
+  }
+  return app.getLoginItemSettings({ path: targetPath }).openAtLogin;
 });
 
 // Creative Project Files & Milestone Deliverables IPCs
@@ -1897,7 +2018,7 @@ ipcMain.handle('assets-list', async () => {
     if (!Array.isArray(assets)) assets = [];
 
     // Scan models directory for 3D model files
-    const supportedExts = ['.blend', '.obj', '.fbx', '.gltf', '.glb'];
+    const supportedExts = ['.blend', '.obj', '.fbx', '.gltf', '.glb', '.stl', '.dae', '.ply', '.3ds', '.abc'];
     const diskFiles = [];
 
     function scan(currentDir) {
@@ -1980,19 +2101,24 @@ ipcMain.handle('assets-list', async () => {
           const buf = fs.readFileSync(previewFile);
           asset.previewUrl = `data:image/png;base64,${buf.toString('base64')}`;
         } catch (e) {}
-      } else if (asset.fileName && asset.fileName.toLowerCase().endsWith('.blend')) {
-        // If preview doesn't exist yet for a .blend file, render it in 3/4 isometric perspective
-        try {
-          const renderResult = await renderBlenderAssetPreview(asset.filePath, previewFile);
-          if (renderResult.success && renderResult.dataUrl) {
-            asset.previewUrl = renderResult.dataUrl;
-            if (renderResult.metadata) {
-              asset.metadata = { ...asset.metadata, ...renderResult.metadata };
+      } else {
+        const is3D = ['.blend', '.obj', '.fbx', '.gltf', '.glb', '.stl', '.dae', '.ply', '.3ds', '.abc'].some((ext) =>
+          (asset.fileName || '').toLowerCase().endsWith(ext)
+        );
+        if (is3D) {
+          // If preview doesn't exist yet, render it with materials in 3/4 isometric perspective
+          try {
+            const renderResult = await renderBlenderAssetPreview(asset.filePath, previewFile);
+            if (renderResult.success && renderResult.dataUrl) {
+              asset.previewUrl = renderResult.dataUrl;
+              if (renderResult.metadata) {
+                asset.metadata = { ...asset.metadata, ...renderResult.metadata };
+              }
+              hasChanges = true;
             }
-            hasChanges = true;
+          } catch (rErr) {
+            console.error('Error auto-rendering preview for asset:', asset.name, rErr);
           }
-        } catch (rErr) {
-          console.error('Error auto-rendering preview for asset:', asset.name, rErr);
         }
       }
     }
@@ -2000,6 +2126,19 @@ ipcMain.handle('assets-list', async () => {
     if (hasChanges) {
       saveVaultAssetsMetadata(modelsDir, assets);
     }
+
+    // Clean up orphaned previews in .previews whose assets were deleted from disk/cloud
+    try {
+      if (fs.existsSync(previewsDir)) {
+        const previewEntries = fs.readdirSync(previewsDir);
+        const validPreviewNames = new Set(assets.map((a) => `${a.id}.png`));
+        for (const pFile of previewEntries) {
+          if (pFile.endsWith('.png') && !validPreviewNames.has(pFile)) {
+            try { fs.unlinkSync(path.join(previewsDir, pFile)); } catch (e) {}
+          }
+        }
+      }
+    } catch (_) {}
 
     const folders = getVaultSubfolders(modelsDir);
     return { success: true, assets, modelsDir, folders };
@@ -2048,11 +2187,17 @@ ipcMain.handle('assets-import', async (_, { sourceFilePath, name, category, tags
     let dataUrl = '';
     let metadata = {};
 
-    if (ext === '.blend') {
+    const is3DModel = ['.blend', '.obj', '.fbx', '.gltf', '.glb', '.stl', '.dae', '.ply', '.3ds', '.abc'].includes(ext);
+    if (is3DModel) {
       const renderRes = await renderBlenderAssetPreview(targetFilePath, previewPngPath);
       if (renderRes.success) {
         dataUrl = renderRes.dataUrl;
         metadata = renderRes.metadata || {};
+      } else {
+        try {
+          const fallbackThumb = await extractThumbnail(targetFilePath);
+          if (fallbackThumb) dataUrl = fallbackThumb;
+        } catch (e) {}
       }
     }
 
@@ -2135,7 +2280,8 @@ ipcMain.handle('assets-select-and-import', async (_, { folder } = {}) => {
       let dataUrl = '';
       let metadata = {};
 
-      if (ext.toLowerCase() === '.blend') {
+      const is3DModel = ['.blend', '.obj', '.fbx', '.gltf', '.glb', '.stl', '.dae', '.ply', '.3ds', '.abc'].includes(ext.toLowerCase());
+      if (is3DModel) {
         const renderRes = await renderBlenderAssetPreview(targetFilePath, previewPngPath);
         if (renderRes.success) {
           dataUrl = renderRes.dataUrl;
@@ -2210,6 +2356,44 @@ ipcMain.handle('assets-render-preview', async (_, assetId) => {
   }
 });
 
+ipcMain.handle('assets-batch-render-previews', async (_, assetIds) => {
+  try {
+    const modelsDir = getVaultModelsDirectory();
+    const previewsDir = path.join(modelsDir, '.previews');
+    const assets = loadVaultAssetsMetadata(modelsDir);
+    const targetIds = Array.isArray(assetIds) && assetIds.length > 0 ? assetIds : assets.map((a) => a.id);
+    let updatedCount = 0;
+
+    for (const id of targetIds) {
+      const asset = assets.find((a) => a.id === id);
+      if (!asset || !fs.existsSync(asset.filePath)) continue;
+      const previewPngPath = asset.previewPath || path.join(previewsDir, `${asset.id}.png`);
+      try {
+        const renderRes = await renderBlenderAssetPreview(asset.filePath, previewPngPath);
+        if (renderRes.success) {
+          asset.previewUrl = renderRes.dataUrl;
+          asset.previewPath = previewPngPath;
+          if (renderRes.metadata) {
+            asset.metadata = { ...asset.metadata, ...renderRes.metadata };
+          }
+          asset.updatedAt = new Date().toISOString();
+          updatedCount++;
+        }
+      } catch (rErr) {
+        console.error('Error batch re-rendering asset:', asset.name, rErr);
+      }
+    }
+
+    if (updatedCount > 0) {
+      saveVaultAssetsMetadata(modelsDir, assets);
+    }
+    return { success: true, updatedCount, assets };
+  } catch (err) {
+    console.error('Error in batch rendering asset previews:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('assets-update', async (_, updatedAsset) => {
   try {
     const modelsDir = getVaultModelsDirectory();
@@ -2231,19 +2415,38 @@ ipcMain.handle('assets-update', async (_, updatedAsset) => {
   }
 });
 
-ipcMain.handle('assets-delete', async (_, { assetId, deleteFile }) => {
+ipcMain.handle('assets-delete', async (_, { assetId, deleteFile = true }) => {
   try {
     const modelsDir = getVaultModelsDirectory();
     let assets = loadVaultAssetsMetadata(modelsDir);
     const target = assets.find((a) => a.id === assetId);
     if (!target) return { success: false, error: 'Asset not found' };
 
-    if (deleteFile) {
-      if (fs.existsSync(target.filePath)) {
-        try { fs.unlinkSync(target.filePath); } catch (e) {}
+    if (deleteFile !== false) {
+      if (target.filePath && fs.existsSync(target.filePath)) {
+        try {
+          fs.unlinkSync(target.filePath);
+        } catch (unlinkErr) {
+          try {
+            await shell.trashItem(target.filePath);
+          } catch (trashErr) {
+            console.error('Failed to delete 3D model file from disk/cloud:', target.filePath, trashErr);
+            return {
+              success: false,
+              error: `Could not delete file "${path.basename(target.filePath)}". It may be open in Blender or another program.`,
+            };
+          }
+        }
       }
-      if (target.previewPath && fs.existsSync(target.previewPath)) {
-        try { fs.unlinkSync(target.previewPath); } catch (e) {}
+
+      const previewCandidates = [
+        target.previewPath,
+        path.join(modelsDir, '.previews', `${target.id}.png`),
+      ];
+      for (const p of previewCandidates) {
+        if (p && fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch (e) {}
+        }
       }
     }
 
@@ -2327,8 +2530,19 @@ ipcMain.handle('assets-delete-folder', async (_, folderPath) => {
       return { success: false, error: 'Access denied' };
     }
     if (fs.existsSync(safePath)) {
-      fs.rmSync(safePath, { recursive: true, force: true });
       let assets = loadVaultAssetsMetadata(modelsDir);
+      const deletedAssets = assets.filter((a) => path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
+      for (const da of deletedAssets) {
+        if (da.previewPath && fs.existsSync(da.previewPath)) {
+          try { fs.unlinkSync(da.previewPath); } catch (e) {}
+        }
+        const fallbackPreview = path.join(modelsDir, '.previews', `${da.id}.png`);
+        if (fs.existsSync(fallbackPreview)) {
+          try { fs.unlinkSync(fallbackPreview); } catch (e) {}
+        }
+      }
+
+      fs.rmSync(safePath, { recursive: true, force: true });
       assets = assets.filter((a) => !path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
       saveVaultAssetsMetadata(modelsDir, assets);
     }
@@ -2572,6 +2786,19 @@ ipcMain.handle('art2d-list', async () => {
       saveVaultArtMetadata(artDir, assets);
     }
 
+    // Clean up orphaned previews in .previews whose artworks were deleted from disk/cloud
+    try {
+      if (fs.existsSync(previewsDir)) {
+        const previewEntries = fs.readdirSync(previewsDir);
+        const validPreviewNames = new Set(assets.map((a) => `${a.id}.png`));
+        for (const pFile of previewEntries) {
+          if (pFile.endsWith('.png') && !validPreviewNames.has(pFile)) {
+            try { fs.unlinkSync(path.join(previewsDir, pFile)); } catch (e) {}
+          }
+        }
+      }
+    } catch (_) {}
+
     const folders = getVaultSubfolders(artDir);
     return { success: true, assets, artDir, folders };
   } catch (err) {
@@ -2797,19 +3024,38 @@ ipcMain.handle('art2d-update', async (_, updatedAsset) => {
   }
 });
 
-ipcMain.handle('art2d-delete', async (_, { assetId, deleteFile }) => {
+ipcMain.handle('art2d-delete', async (_, { assetId, deleteFile = true }) => {
   try {
     const artDir = getVaultArtDirectory();
     let assets = loadVaultArtMetadata(artDir);
     const target = assets.find((a) => a.id === assetId);
     if (!target) return { success: false, error: 'Artwork not found' };
 
-    if (deleteFile) {
-      if (fs.existsSync(target.filePath)) {
-        try { fs.unlinkSync(target.filePath); } catch (e) {}
+    if (deleteFile !== false) {
+      if (target.filePath && fs.existsSync(target.filePath)) {
+        try {
+          fs.unlinkSync(target.filePath);
+        } catch (unlinkErr) {
+          try {
+            await shell.trashItem(target.filePath);
+          } catch (trashErr) {
+            console.error('Failed to delete artwork file from disk/cloud:', target.filePath, trashErr);
+            return {
+              success: false,
+              error: `Could not delete file "${path.basename(target.filePath)}". It may be open in Krita, Photoshop, or another program.`,
+            };
+          }
+        }
       }
-      if (target.previewPath && fs.existsSync(target.previewPath)) {
-        try { fs.unlinkSync(target.previewPath); } catch (e) {}
+
+      const previewCandidates = [
+        target.previewPath,
+        path.join(artDir, '.previews', `${target.id}.png`),
+      ];
+      for (const p of previewCandidates) {
+        if (p && fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch (e) {}
+        }
       }
     }
 
@@ -2893,8 +3139,19 @@ ipcMain.handle('art2d-delete-folder', async (_, folderPath) => {
       return { success: false, error: 'Access denied' };
     }
     if (fs.existsSync(safePath)) {
-      fs.rmSync(safePath, { recursive: true, force: true });
       let assets = loadVaultArtMetadata(artDir);
+      const deletedAssets = assets.filter((a) => path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
+      for (const da of deletedAssets) {
+        if (da.previewPath && fs.existsSync(da.previewPath)) {
+          try { fs.unlinkSync(da.previewPath); } catch (e) {}
+        }
+        const fallbackPreview = path.join(artDir, '.previews', `${da.id}.png`);
+        if (fs.existsSync(fallbackPreview)) {
+          try { fs.unlinkSync(fallbackPreview); } catch (e) {}
+        }
+      }
+
+      fs.rmSync(safePath, { recursive: true, force: true });
       assets = assets.filter((a) => !path.normalize(a.filePath).toLowerCase().startsWith(safePath.toLowerCase()));
       saveVaultArtMetadata(artDir, assets);
     }
@@ -3334,6 +3591,7 @@ ipcMain.handle('updater-install', () => {
 });
 
 app.whenReady().then(() => {
+  sanitizeStartupRegistry();
   createWindow();
   setupTray();
 

@@ -66,7 +66,7 @@ function generateMajorGoalsMarkdown(data) {
     const linked = allTasks.filter((t) => t.majorTaskId === m.id && !t.archived);
     const completedCount = linked.filter((t) => t.completed).length;
     const pct = linked.length > 0 ? Math.round((completedCount / linked.length) * 100) : m.completed ? 100 : 0;
-    const statusBadge = m.completed ? '✅ Completed' : pct > 0 ? '🟢 In Progress' : '⚪ Planned';
+    const statusBadge = m.completed ? '✅ Completed' : m.paused ? '⏸️ Paused' : pct > 0 ? '🟢 In Progress' : '⚪ Planned';
     const target = m.targetDate ? `\`${m.targetDate}\`` : '—';
     const progressStr = linked.length > 0 ? `${renderProgressBar(pct)} (${completedCount}/${linked.length})` : m.completed ? '`[██████████]` 100%' : '`[░░░░░░░░░░]` 0%';
 
@@ -81,7 +81,7 @@ function generateMajorGoalsMarkdown(data) {
     const linked = allTasks.filter((t) => t.majorTaskId === m.id && !t.archived);
     const completedCount = linked.filter((t) => t.completed).length;
     const pct = linked.length > 0 ? Math.round((completedCount / linked.length) * 100) : m.completed ? 100 : 0;
-    const statusText = m.completed ? '✅ Completed' : pct > 0 ? '🟢 In Progress' : '⚪ Planned';
+    const statusText = m.completed ? '✅ Completed' : m.paused ? '⏸️ Paused' : pct > 0 ? '🟢 In Progress' : '⚪ Planned';
 
     md += `## ${i + 1}. ${m.title}\n\n`;
     md += `- **Theme:** \`${m.theme || 'General'}\`\n`;
@@ -121,9 +121,8 @@ function generateMajorGoalsMarkdown(data) {
       if (pendingTasks.length > 0) {
         md += `#### In-Progress & Next Steps\n\n`;
         for (const t of pendingTasks) {
-          const energyBadge = t.energy === 'high' ? '⚡' : t.energy === 'low' ? '☕' : '';
           const due = t.date ? ` *(Due: ${t.date})*` : '';
-          md += `- [ ] **${t.title}** ${energyBadge}${due}\n`;
+          md += `- [ ] **${t.title}**${due}\n`;
           if (t.notes) {
             md += `  > ${t.notes.split('\n').join('\n  > ')}\n`;
           }
@@ -166,7 +165,10 @@ function generateDailyTasksMarkdown(data) {
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
 
-  const activeTasks = allTasks.filter((t) => !t.archived && !t.completed);
+  const pausedMajorIds = new Set(
+    majorTasks.filter((m) => m.paused).map((m) => m.id)
+  );
+  const activeTasks = allTasks.filter((t) => !t.archived && !t.completed && (!t.majorTaskId || !pausedMajorIds.has(t.majorTaskId)));
   const completedTasks = allTasks.filter((t) => !t.archived && t.completed);
 
   let md = '';
@@ -275,13 +277,11 @@ function generateDailyTasksMarkdown(data) {
   }
 
   function renderTaskItem(t) {
-    const energyBadge = t.energy === 'high' ? '⚡ High Energy' : t.energy === 'low' ? '☕ Low Energy' : '';
-    const energyStr = energyBadge ? `\`[${energyBadge}]\`` : '';
     const majorName = t.majorTaskId ? majorMap.get(t.majorTaskId) : null;
     const majorStr = majorName ? `↳ *Goal:* **${majorName}**` : '';
     const dueStr = t.date && t.date !== todayStr ? `*(Scheduled: ${t.date})*` : '';
 
-    md += `- [ ] **${t.title}** ${energyStr} ${dueStr}\n`;
+    md += `- [ ] **${t.title}** ${dueStr}\n`.replace('  \n', '\n');
     if (majorStr) {
       md += `  ${majorStr}\n`;
     }

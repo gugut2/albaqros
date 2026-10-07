@@ -23,7 +23,11 @@ export function calculateMajorTaskProgress(
     percentage = 100;
   }
 
-  const label = total > 0
+  const label = majorTask.paused
+    ? total > 0
+      ? `Paused • ${completed} of ${total} tasks done (${percentage}%)`
+      : 'Paused (0%)'
+    : total > 0
     ? `${completed} of ${total} tasks done (${percentage}%)`
     : majorTask.completed
     ? 'Completed'
@@ -63,6 +67,18 @@ export interface CadenceStatus {
 export function calculateCadenceStatus(majorTask: MajorTask): CadenceStatus {
   const artifacts = majorTask.artifacts || [];
   const totalArtifacts = artifacts.length;
+
+  if (majorTask.paused) {
+    return {
+      hasCadence: Boolean(majorTask.cadenceDays && majorTask.cadenceDays > 0),
+      cadenceDays: majorTask.cadenceDays,
+      daysSinceLastDeliverable: 0,
+      daysRemaining: 0,
+      status: 'no_cadence',
+      badgeText: 'Project Paused',
+      totalArtifacts,
+    };
+  }
 
   if (!majorTask.cadenceDays || majorTask.cadenceDays <= 0) {
     return {

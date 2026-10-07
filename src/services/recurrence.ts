@@ -1,4 +1,4 @@
-import { RecurrenceRule, Task } from '../types';
+import { MajorTask, RecurrenceRule, Task } from '../types';
 import { getTodayString } from './storage';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -164,8 +164,13 @@ export function getCycleStatus(rule?: RecurrenceRule): {
 /**
  * Rolls over unfinished tasks from previous days to today,
  * calculates and increments `daysMissed`, and returns the updated task list.
+ * Tasks belonging to paused projects are kept on hold and not rolled over.
  */
-export function processDayRollover(tasks: Task[], lastOpenedDate: string): Task[] {
+export function processDayRollover(
+  tasks: Task[],
+  lastOpenedDate: string,
+  majorTasks?: MajorTask[]
+): Task[] {
   const today = getTodayString();
   if (lastOpenedDate === today) {
     return tasks;
@@ -175,9 +180,18 @@ export function processDayRollover(tasks: Task[], lastOpenedDate: string): Task[
   const curDate = new Date(today);
   const diffDays = Math.max(1, Math.floor((curDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24)));
 
+  const pausedMajorIds = new Set(
+    (majorTasks || []).filter((m) => m.paused).map((m) => m.id)
+  );
+
   return tasks.map((task) => {
     // If it's already completed or archived, leave it on its historical date
     if (task.completed || task.archived) {
+      return task;
+    }
+
+    // If task belongs to a paused project, keep it on pause without accruing daysMissed
+    if (task.majorTaskId && pausedMajorIds.has(task.majorTaskId)) {
       return task;
     }
 

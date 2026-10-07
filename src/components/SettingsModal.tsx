@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink, Sparkles, RefreshCw, ArrowUpCircle, AlertTriangle, FileText } from 'lucide-react';
+import { Settings, Folder, Cloud, Download, Monitor, Pin, X, Check, ShieldCheck, ExternalLink, Sparkles, RefreshCw, ArrowUpCircle, AlertTriangle, FileText, Maximize2, AppWindow } from 'lucide-react';
 import { AppData, AppSettings, VaultInfo, UpdateInfo } from '../types';
 import { StorageService } from '../services/storage';
 
@@ -11,6 +11,7 @@ interface SettingsModalProps {
   data: AppData;
   vaultInfo?: VaultInfo | null;
   onOpenVaultModal?: () => void;
+  onSwitchWindowMode?: (mode: 'compact' | 'maximized') => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -21,15 +22,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   data,
   vaultInfo,
   onOpenVaultModal,
+  onSwitchWindowMode,
 }) => {
   const [currentPath, setCurrentPath] = useState(settings.storagePath || 'Default User Data Directory');
   const [runOnStartup, setRunOnStartup] = useState(settings.runOnStartup);
   const [alwaysOnTop, setAlwaysOnTop] = useState(settings.alwaysOnTop);
+  const [compactMode, setCompactMode] = useState<boolean>(settings.compactMode !== false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('1.0.0');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({ state: 'idle' });
 
   useEffect(() => {
+    setCompactMode(settings.compactMode !== false);
+    setAlwaysOnTop(Boolean(settings.alwaysOnTop));
+    if (settings.storagePath) setCurrentPath(settings.storagePath);
+
     // If electron is available, check native auto-launch state, version, and storage path
     if (typeof window !== 'undefined') {
       if ((window as any).electronAPI?.getStorageInfo) {
@@ -51,7 +58,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (unsubscribe) unsubscribe();
       };
     }
-  }, [isOpen]);
+  }, [isOpen, settings]);
 
   if (!isOpen) return null;
 
@@ -103,6 +110,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       (window as any).electronAPI.setAlwaysOnTop(val);
     }
     onUpdateSettings({ ...settings, alwaysOnTop: val });
+    showSaved();
+  };
+
+  const handleSelectDefaultWindowMode = (isWidget: boolean) => {
+    setCompactMode(isWidget);
+    const updatedSettings: AppSettings = {
+      ...settings,
+      compactMode: isWidget,
+    };
+    onUpdateSettings(updatedSettings);
+    if (onSwitchWindowMode) {
+      onSwitchWindowMode(isWidget ? 'compact' : 'maximized');
+    }
     showSaved();
   };
 
@@ -264,12 +284,82 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Monitor size={15} color="#a855f7" /> Desktop Behaviors
             </span>
 
+            {/* Main Window Version Selection */}
+            <div>
+              <div style={{ fontSize: '0.825rem', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '2px' }}>
+                Main Window Version (Default Mode)
+              </div>
+              <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                Select whether Albaqros defaults to the floating daily widget or the maximized studio
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleSelectDefaultWindowMode(true)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '4px',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: compactMode ? '1px solid #6366f1' : '1px solid var(--border-subtle)',
+                    backgroundColor: compactMode ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.825rem', fontWeight: 600, color: compactMode ? '#ffffff' : 'var(--text-secondary)' }}>
+                      <Monitor size={14} color={compactMode ? '#818cf8' : 'currentColor'} />
+                      Widget Version
+                    </div>
+                    {compactMode && <Check size={13} color="#818cf8" />}
+                  </div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                    Compact floating side widget for quick daily tasks
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectDefaultWindowMode(false)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '4px',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: !compactMode ? '1px solid #6366f1' : '1px solid var(--border-subtle)',
+                    backgroundColor: !compactMode ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.825rem', fontWeight: 600, color: !compactMode ? '#ffffff' : 'var(--text-secondary)' }}>
+                      <Maximize2 size={14} color={!compactMode ? '#818cf8' : 'currentColor'} />
+                      Maximized Version
+                    </div>
+                    {!compactMode && <Check size={13} color="#818cf8" />}
+                  </div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                    Full studio workspace with 2D/3D, canvas, notes & goals
+                  </span>
+                </button>
+              </div>
+            </div>
+
             {/* Launch on Startup Toggle */}
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
               <div>
                 <div style={{ fontSize: '0.825rem', color: 'var(--text-primary)' }}>Open on Windows Startup</div>
                 <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
-                  Launches automatically in minimal widget mode when your PC starts
+                  Launches automatically in your preferred mode when your PC starts
                 </div>
               </div>
               <input

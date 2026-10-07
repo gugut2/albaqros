@@ -19,8 +19,7 @@ import {
 import {
   Flame,
   CheckCircle2,
-  Zap,
-  Coffee,
+  Target,
   BarChart3,
   PieChart as PieIcon,
   TrendingUp,
@@ -210,7 +209,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               transition: 'all 0.15s ease',
             }}
           >
-            <Zap size={14} />
+            <Target size={14} />
             Tasks & Productivity
           </button>
 
@@ -1043,7 +1042,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {(activeSection === 'tasks' || activeSection === 'combined') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Top Stat Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
             {/* Streak */}
             <div
               className="glass-panel"
@@ -1077,6 +1076,39 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               </div>
             </div>
 
+            {/* Total Completed */}
+            <div
+              className="glass-panel"
+              style={{
+                padding: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '14px',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+              }}
+            >
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#818cf8',
+                }}
+              >
+                <Target size={22} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>TOTAL COMPLETED</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
+                  {analytics.totalCompleted} tasks
+                </div>
+              </div>
+            </div>
+
             {/* Completion Rate */}
             <div
               className="glass-panel"
@@ -1106,72 +1138,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>COMPLETION RATE</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
                   {analytics.completionRate}%
-                </div>
-              </div>
-            </div>
-
-            {/* High Focus Tasks */}
-            <div
-              className="glass-panel"
-              style={{
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '14px',
-                border: '1px solid rgba(239, 68, 68, 0.25)',
-              }}
-            >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#ef4444',
-                }}
-              >
-                <Zap size={22} />
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>HIGH FOCUS (⚡)</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
-                  {analytics.highEnergyCount} completed
-                </div>
-              </div>
-            </div>
-
-            {/* Low Energy Chores */}
-            <div
-              className="glass-panel"
-              style={{
-                padding: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '14px',
-                border: '1px solid rgba(16, 185, 129, 0.25)',
-              }}
-            >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#34d399',
-                }}
-              >
-                <Coffee size={22} />
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>LIGHT CHORES (☕)</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-display)' }}>
-                  {analytics.lowEnergyCount} completed
                 </div>
               </div>
             </div>
@@ -1254,109 +1220,65 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </div>
           </div>
 
-          {/* Grid: Theme Consistency & Energy Distribution */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-            {/* Theme Consistency Breakdown */}
-            <div
-              className="glass-panel"
-              style={{
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-              }}
-            >
+          {/* Theme Consistency Breakdown */}
+          <div
+            className="glass-panel"
+            style={{
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Layers size={16} color="#818cf8" />
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>
                   Consistency by Life Facet
                 </h4>
               </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {analytics.themeStats.map((stat) => (
-                  <div key={stat.theme}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, color: stat.color }}>#{stat.theme}</span>
-                      <span style={{ color: 'var(--text-secondary)' }}>
-                        {stat.completed}/{stat.total} ({stat.rate}%)
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: '6px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                        borderRadius: '999px',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${stat.rate}%`,
-                          backgroundColor: stat.color,
-                          borderRadius: '999px',
-                          transition: 'width 0.4s ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {analytics.themeStats.length} active facets
+              </span>
             </div>
 
-            {/* Energy Balance Donut */}
-            <div
-              className="glass-panel"
-              style={{
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <PieIcon size={16} color="#34d399" />
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Energy Expenditure Balance
-                </h4>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', height: '180px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={analytics.energyDistribution}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={70}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {analytics.energyDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#161b24',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                        borderRadius: '8px',
-                        fontSize: '0.8rem',
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+              {analytics.themeStats.map((stat) => (
+                <div
+                  key={stat.theme}
+                  style={{
+                    padding: '10px 14px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '6px' }}>
+                    <span style={{ fontWeight: 600, color: stat.color }}>#{stat.theme}</span>
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      {stat.completed}/{stat.total} ({stat.rate}%)
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: '6px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      borderRadius: '999px',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${stat.rate}%`,
+                        backgroundColor: stat.color,
+                        borderRadius: '999px',
+                        transition: 'width 0.4s ease',
                       }}
                     />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', fontSize: '0.75rem' }}>
-                {analytics.energyDistribution.map((item) => (
-                  <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: item.color }} />
-                    <span style={{ color: 'var(--text-secondary)' }}>{item.name}: {item.value}</span>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

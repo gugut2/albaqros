@@ -8,9 +8,10 @@ const { findBlenderExecutable } = require('./thumbnailExtractor.cjs');
  * an asset in 3/4 isometric perspective (camera pointing downwards)
  * and extracting mesh metadata (faces, verts, dimensions, materials).
  */
-function buildRenderScriptContent(outPngPath, metaJsonPath) {
+function buildRenderScriptContent(outPngPath, metaJsonPath, importFilePath) {
   const safeOutPng = outPngPath.replace(/\\/g, '/');
   const safeMetaJson = metaJsonPath ? metaJsonPath.replace(/\\/g, '/') : '';
+  const safeImportPath = importFilePath ? importFilePath.replace(/\\/g, '/') : '';
 
   return `
 import bpy
@@ -21,6 +22,42 @@ import math
 from mathutils import Vector
 
 def run():
+    import_path = r'${safeImportPath}'
+    if import_path:
+        ext = os.path.splitext(import_path)[1].lower()
+        if ext != '.blend':
+            try:
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+            except Exception:
+                pass
+
+            try:
+                if ext == '.obj':
+                    try:
+                        bpy.ops.wm.obj_import(filepath=import_path)
+                    except Exception:
+                        bpy.ops.import_scene.obj(filepath=import_path)
+                elif ext == '.fbx':
+                    bpy.ops.import_scene.fbx(filepath=import_path)
+                elif ext in ('.gltf', '.glb'):
+                    bpy.ops.import_scene.gltf(filepath=import_path)
+                elif ext == '.stl':
+                    try:
+                        bpy.ops.wm.stl_import(filepath=import_path)
+                    except Exception:
+                        bpy.ops.import_mesh.stl(filepath=import_path)
+                elif ext == '.ply':
+                    try:
+                        bpy.ops.wm.ply_import(filepath=import_path)
+                    except Exception:
+                        bpy.ops.import_mesh.ply(filepath=import_path)
+                elif ext == '.dae':
+                    bpy.ops.wm.collada_import(filepath=import_path)
+                elif ext == '.abc':
+                    bpy.ops.wm.alembic_import(filepath=import_path)
+            except Exception as e:
+                print("IMPORT_ERROR:", e)
+
     scene = bpy.context.scene
 
     # 1. Gather all mesh objects (prefer visible in render)
@@ -92,15 +129,114 @@ def run():
     cam_data.clip_start = max(0.01, distance - radius * 2.5)
     cam_data.clip_end = distance + radius * 3.5
 
-    # 4. Standardized studio workbench rendering settings
-    scene.render.engine = 'BLENDER_WORKBENCH'
-    scene.display.shading.light = 'STUDIO'
-    scene.display.shading.color_type = 'MATERIAL'
+    # 4. Standardized studio material rendering settings with EEVEE & 3-point studio lighting
+    world = scene.world or bpy.data.worlds.new('AlbaqrosStudioWorld')
+    scene.world = world
     try:
-        scene.display.shading.show_cavity = True
-        scene.display.shading.cavity_type = 'BOTH'
-        scene.display.shading.curvature_ridge_factor = 1.2
-        scene.display.shading.curvature_valley_factor = 0.8
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get('Background')
+        if bg:
+            bg.inputs['Color'].default_value = (0.9, 0.92, 0.96, 1.0)
+            bg.inputs['Strength'].default_value = 0.65
+    except Exception:
+        pass
+
+    # Hide existing scene lights so they don't overpower or discolor the studio preview
+    for obj in list(scene.objects):
+        if obj.type == 'LIGHT':
+            obj.hide_render = True
+
+    # 3-Point Studio Lights
+    # Key light (warm-white Sun from top-right)
+    key_light_data = bpy.data.lights.new('AlbaqrosKeyLight', 'SUN')
+    key_light_data.energy = 2.4
+    key_light_data.color = (1.0, 0.98, 0.95)
+    key_light = bpy.data.objects.new('AlbaqrosKeyLight', key_light_data)
+    scene.collection.objects.link(key_light)
+    key_light.rotation_euler = (math.radians(45), math.radians(15), math.radians(45))
+
+    # Fill light (cool-soft fill from left)
+    fill_light_data = bpy.data.lights.new('AlbaqrosFillLight', 'SUN')
+    fill_light_data.energy = 1.0
+    fill_light_data.color = (0.92, 0.95, 1.0)
+    fill_light = bpy.data.objects.new('AlbaqrosFillLight', fill_light_data)
+    scene.collection.objects.link(fill_light)
+    fill_light.rotation_euler = (math.radians(35), math.radians(-30), math.radians(-60))
+
+    # Rim light (back-light for crisp silhouette & edge definition)
+    rim_light_data = bpy.data.lights.new('AlbaqrosRimLight', 'SUN')
+    rim_light_data.energy = 1.8
+    rim_light_data.color = (1.0, 1.0, 1.0)
+    rim_light = bpy.data.objects.new('AlbaqrosRimLight', rim_light_data)
+    scene.collection.objects.link(rim_light)
+    rim_light.rotation_euler = (math.radians(-60), math.radians(10), math.radians(150))
+
+    # Ensure all materials evaluate properly with shader nodes
+    for mat in bpy.data.materials:
+        if not mat.use_nodes:
+            try:
+                mat.use_nodes = True
+                bsdf = mat.node_tree.nodes.get('Principled BSDF')
+                if bsdf and hasattr(mat, 'diffuse_color'):
+                    bsdf.inputs['Base Color'].default_value = mat.diffuse_color
+            except Exception:
+                pass
+
+    # Ensure meshes without materials have a clean studio neutral material
+    default_studio_mat = None
+    for obj in mesh_objs:
+        if obj.type == 'MESH' and obj.data:
+            has_mat = bool(obj.data.materials) and any(m is not None for m in obj.data.materials)
+            if not has_mat:
+                if not default_studio_mat:
+                    default_studio_mat = bpy.data.materials.new('AlbaqrosStudioDefault')
+                    default_studio_mat.use_nodes = True
+                    bsdf = default_studio_mat.node_tree.nodes.get('Principled BSDF')
+                    if bsdf:
+                        bsdf.inputs['Base Color'].default_value = (0.75, 0.78, 0.82, 1.0)
+                        bsdf.inputs['Roughness'].default_value = 0.4
+                if not obj.data.materials:
+                    obj.data.materials.append(default_studio_mat)
+                else:
+                    for idx in range(len(obj.data.materials)):
+                        if obj.data.materials[idx] is None:
+                            obj.data.materials[idx] = default_studio_mat
+
+    # Remap missing texture image paths if located in same folder or textures/ subfolder
+    source_dir = os.path.dirname(r'${safeImportPath || safeOutPng}')
+    for img in bpy.data.images:
+        try:
+            if img.filepath and not os.path.exists(bpy.path.abspath(img.filepath)):
+                base = os.path.basename(img.filepath)
+                cand = os.path.join(source_dir, base)
+                if os.path.exists(cand):
+                    img.filepath = cand
+                else:
+                    cand_tex = os.path.join(source_dir, 'textures', base)
+                    if os.path.exists(cand_tex):
+                        img.filepath = cand_tex
+        except Exception:
+            pass
+
+    # Detect available render engines and choose material-capable engine
+    available_engines = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items]
+
+    if 'BLENDER_EEVEE' in available_engines:
+        scene.render.engine = 'BLENDER_EEVEE'
+    elif 'BLENDER_EEVEE_NEXT' in available_engines:
+        scene.render.engine = 'BLENDER_EEVEE_NEXT'
+    elif 'CYCLES' in available_engines:
+        scene.render.engine = 'CYCLES'
+    else:
+        scene.render.engine = 'BLENDER_WORKBENCH'
+        scene.display.shading.color_type = 'TEXTURE'
+
+    try:
+        if hasattr(scene, 'eevee'):
+            if hasattr(scene.eevee, 'taa_render_samples'):
+                scene.eevee.taa_render_samples = 32
+            if hasattr(scene.eevee, 'use_shadows'):
+                scene.eevee.use_shadows = True
     except Exception:
         pass
 
@@ -111,11 +247,35 @@ def run():
     scene.render.image_settings.file_format = 'PNG'
     scene.render.filepath = r'${safeOutPng}'
 
+    # Render with materials, falling back gracefully if necessary
+    rendered_ok = False
     try:
         bpy.ops.render.render(write_still=True)
-    except Exception as e:
-        print("RENDER_ERROR:" + str(e))
-        return
+        rendered_ok = True
+    except Exception as eevee_e:
+        print("Primary render failed, trying fallback:", eevee_e)
+
+    if not rendered_ok:
+        try:
+            if 'CYCLES' in available_engines:
+                scene.render.engine = 'CYCLES'
+                scene.cycles.samples = 16
+                scene.cycles.use_denoising = True
+                bpy.ops.render.render(write_still=True)
+                rendered_ok = True
+        except Exception as cyc_e:
+            print("Cycles fallback failed:", cyc_e)
+
+    if not rendered_ok:
+        try:
+            scene.render.engine = 'BLENDER_WORKBENCH'
+            scene.display.shading.light = 'STUDIO'
+            scene.display.shading.color_type = 'TEXTURE'
+            bpy.ops.render.render(write_still=True)
+            rendered_ok = True
+        except Exception as wb_e:
+            print("RENDER_ERROR:" + str(wb_e))
+            return
 
     metadata = {
         'vertexCount': total_verts,
@@ -222,14 +382,18 @@ async function renderBlenderAssetPreview(blendFilePath, outPngPath) {
       } catch (e) {}
     }
 
-    const pyCode = buildRenderScriptContent(finalPngPath, metaJsonPath);
+    const ext = path.extname(absBlendFilePath).toLowerCase();
+    const isBlend = ext === '.blend';
+    const pyCode = buildRenderScriptContent(finalPngPath, metaJsonPath, absBlendFilePath);
     try {
       fs.writeFileSync(scriptPath, pyCode, 'utf8');
     } catch (err) {
       return resolve({ success: false, error: 'Failed to write render script: ' + err.message });
     }
 
-    const cmd = `"${blenderExe}" "${absBlendFilePath}" --factory-startup -b -noaudio -P "${scriptPath}"`;
+    const cmd = isBlend
+      ? `"${blenderExe}" "${absBlendFilePath}" --factory-startup -b -noaudio -P "${scriptPath}"`
+      : `"${blenderExe}" --factory-startup -b -noaudio -P "${scriptPath}"`;
 
     exec(cmd, { timeout: 35000 }, (error, stdout, stderr) => {
       // Clean up script

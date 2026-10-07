@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import {
   Check,
   Star,
-  Zap,
-  Coffee,
   RotateCcw,
   AlertTriangle,
   Trash2,
@@ -16,6 +14,7 @@ import {
   Edit2,
   CalendarClock,
   CalendarPlus,
+  Pause,
 } from 'lucide-react';
 import { MajorTask, Task } from '../types';
 import { getRecurrenceDescription } from '../services/recurrence';
@@ -197,27 +196,31 @@ export const TaskItem: React.FC<TaskItemProps> = ({
               {/* Major Goal Link Badge */}
               {linkedMajor && (
                 <span
-                  title={`Linked to Major Goal: ${linkedMajor.title}${majorProgress ? ` • ${majorProgress.label}` : ''}`}
+                  title={`Linked to Major Goal: ${linkedMajor.title}${linkedMajor.paused ? ' (Paused)' : ''}${majorProgress ? ` • ${majorProgress.label}` : ''}`}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '4px',
                     fontSize: '0.675rem',
                     fontWeight: 600,
-                    color: '#38bdf8',
-                    backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    color: linkedMajor.paused ? '#fbbf24' : '#38bdf8',
+                    backgroundColor: linkedMajor.paused ? 'rgba(245, 158, 11, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                    border: linkedMajor.paused ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)',
                     padding: '1px 7px',
                     borderRadius: '4px',
                   }}
                 >
-                  <Target size={10} />
+                  {linkedMajor.paused ? <Pause size={9} /> : <Target size={10} />}
                   <span>{linkedMajor.title}</span>
-                  {majorProgress && (
+                  {linkedMajor.paused ? (
+                    <span style={{ opacity: 0.85, fontSize: '0.625rem', marginLeft: '1px', color: '#f59e0b' }}>
+                      (Paused)
+                    </span>
+                  ) : majorProgress ? (
                     <span style={{ opacity: 0.85, fontSize: '0.625rem', marginLeft: '1px' }}>
                       ({majorProgress.percentage}%)
                     </span>
-                  )}
+                  ) : null}
                 </span>
               )}
 
@@ -267,17 +270,6 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 </button>
               )}
 
-              {/* Energy Badge */}
-              {task.energy === 'high' && (
-                <span className="badge badge-energy-high">
-                  <Zap size={10} /> Focus ⚡
-                </span>
-              )}
-              {task.energy === 'low' && (
-                <span className="badge badge-energy-low">
-                  <Coffee size={10} /> Light ☕
-                </span>
-              )}
 
               {/* Recurrence Badge */}
               {task.recurrence?.isRecurring && (

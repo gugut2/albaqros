@@ -1,6 +1,15 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPathForFile: (file) => {
+    if (webUtils && typeof webUtils.getPathForFile === 'function') {
+      try {
+        const p = webUtils.getPathForFile(file);
+        if (p) return p;
+      } catch (e) {}
+    }
+    return file?.path || '';
+  },
   minimize: () => ipcRenderer.invoke('window-minimize'),
   close: () => ipcRenderer.invoke('window-close'),
   toggleWindowMode: (targetMode) => ipcRenderer.invoke('window-toggle-mode', targetMode),
@@ -99,8 +108,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     importAsset: (params) => ipcRenderer.invoke('assets-import', params),
     selectAndImportAsset: (params) => ipcRenderer.invoke('assets-select-and-import', params),
     renderPreview: (assetId) => ipcRenderer.invoke('assets-render-preview', assetId),
+    batchRenderPreviews: (assetIds) => ipcRenderer.invoke('assets-batch-render-previews', assetIds),
     updateAsset: (asset) => ipcRenderer.invoke('assets-update', asset),
-    deleteAsset: (assetId, deleteFile) => ipcRenderer.invoke('assets-delete', { assetId, deleteFile }),
+    deleteAsset: (assetId, deleteFile = true) => ipcRenderer.invoke('assets-delete', { assetId, deleteFile }),
     openInBlender: (filePath) => ipcRenderer.invoke('assets-open-in-blender', filePath),
     openAssetsFolder: (subfolder) => ipcRenderer.invoke('assets-open-folder', subfolder),
     createScene: (assetIds, sceneName) => ipcRenderer.invoke('assets-create-scene', { assetIds, sceneName }),
@@ -115,7 +125,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectAndImportAsset: (params) => ipcRenderer.invoke('art2d-select-and-import', params),
     extractPreview: (assetId) => ipcRenderer.invoke('art2d-extract-preview', assetId),
     updateAsset: (asset) => ipcRenderer.invoke('art2d-update', asset),
-    deleteAsset: (assetId, deleteFile) => ipcRenderer.invoke('art2d-delete', { assetId, deleteFile }),
+    deleteAsset: (assetId, deleteFile = true) => ipcRenderer.invoke('art2d-delete', { assetId, deleteFile }),
     openInSoftware: (filePath, preferredSoftware) =>
       ipcRenderer.invoke('art2d-open-software', { filePath, preferredSoftware }),
     openFolder: (subfolder) => ipcRenderer.invoke('art2d-open-folder', subfolder),

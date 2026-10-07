@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Art2DAsset, Art2DSoftware } from '../types';
 import { Art2dService } from '../services/art2dService';
+import { routeAndImportFiles, setActive2DFolder } from '../services/fileDropRouter';
 
 interface Art2DStudioViewProps {
   isStudioSidebarCollapsed?: boolean;
@@ -152,11 +153,24 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
 
   useEffect(() => {
     loadAssets();
+    const handleArtUpdated = () => {
+      loadAssets();
+    };
+    window.addEventListener('albaqros-art2d-updated', handleArtUpdated);
+    return () => {
+      window.removeEventListener('albaqros-art2d-updated', handleArtUpdated);
+    };
   }, [loadAssets]);
+
+  // Synchronize active folder so global drag & drop automatically saves into this folder
+  useEffect(() => {
+    setActive2DFolder(selectedFolder || undefined);
+    return () => setActive2DFolder(undefined);
+  }, [selectedFolder]);
 
   const showNotice = (msg: string) => {
     setNotice(msg);
-    setTimeout(() => setNotice(null), 3500);
+    setTimeout(() => setNotice(null), 4000);
   };
 
   // Import handler via file picker dialog
@@ -177,39 +191,38 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
   // Drag and drop handler
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(false);
     if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
 
-    const files = Array.from(e.dataTransfer.files);
-    let importedCount = 0;
-    const supportedExts = ['.kra', '.psd', '.psb', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.clip', '.bmp', '.gif', '.tiff'];
     const targetFolder = selectedFolder && selectedFolder !== '' ? selectedFolder : undefined;
+    showNotice(`Processing ${e.dataTransfer.files.length} dropped file(s)...`);
 
-    showNotice(`Importing & rendering previews for ${files.length} file(s)...`);
+    try {
+      const summary = await routeAndImportFiles(e.dataTransfer.files, {
+        default2DFolder: targetFolder,
+        default2DCategory: selectedCategory !== 'All' ? selectedCategory : 'Illustrations',
+        onProgress: (current, total, name) => {
+          showNotice(`Importing (${current}/${total}): ${name}...`);
+        },
+      });
 
-    for (const file of files) {
-      const pathOnDisk = (file as any).path;
-      if (pathOnDisk) {
-        const ext = '.' + pathOnDisk.split('.').pop()?.toLowerCase();
-        if (supportedExts.includes(ext)) {
-          const res = await Art2dService.importAsset({
-            sourceFilePath: pathOnDisk,
-            name: file.name.replace(/\.[^/.]+$/, ''),
-            category: selectedCategory !== 'All' ? selectedCategory : 'Illustrations',
-            folder: targetFolder,
-            copyToVault: true,
-          });
-          if (res.success) importedCount++;
+      if (summary.totalSuccess > 0) {
+        const msgParts: string[] = [];
+        if (summary.imported2D.length > 0) {
+          const dest = targetFolder ? ` into "${targetFolder}"` : '';
+          msgParts.push(`${summary.imported2D.length} artwork(s)${dest}`);
         }
+        if (summary.imported3D.length > 0) {
+          msgParts.push(`${summary.imported3D.length} 3D model(s) to 3D Library`);
+        }
+        showNotice(`✨ Saved ${msgParts.join(' & ')}!`);
+        await loadAssets();
+      } else if (summary.unsupportedNames.length > 0) {
+        showNotice('No supported 2D or 3D media recognized in dropped file(s)');
       }
-    }
-
-    if (importedCount > 0) {
-      const dest = targetFolder ? ` into "${targetFolder}"` : '';
-      showNotice(`Successfully added ${importedCount} artwork(s)${dest} to your 2D library!`);
-      await loadAssets();
-    } else {
-      showNotice('No supported creative files found in dropped items.');
+    } catch (err: any) {
+      showNotice('Drop import error: ' + err.message);
     }
   };
 
@@ -416,8 +429,10 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
   };
 
   // Delete artwork
-  const handleDeleteAsset = async (assetId: string, deleteFile = false) => {
-    if (!window.confirm(`Delete this artwork from your library${deleteFile ? ' and permanently remove from disk' : ''}?`)) {
+  const handleDeleteAsset = async (assetId: string, deleteFile = true) => {
+    const targetAsset = assets.find((a) => a.id === assetId);
+    const assetName = targetAsset ? targetAsset.name : 'this artwork';
+    if (!window.confirm(`Delete "${assetName}"?\n\nThe file will be permanently removed from your vault and deleted from cloud storage.`)) {
       return;
     }
     try {
@@ -428,7 +443,9 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
         if (detailAsset?.id === assetId) {
           setDetailAsset(null);
         }
-        showNotice('Artwork removed from library');
+        showNotice('Artwork deleted from library & cloud');
+      } else {
+        showNotice('Failed to delete artwork: ' + (res.error || 'Unknown error'));
       }
     } catch (err: any) {
       showNotice('Failed to delete artwork: ' + err.message);
@@ -452,17 +469,27 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
   };
 
   // Batch delete
-  const handleBatchDelete = async (deleteFiles = false) => {
+  const handleBatchDelete = async (deleteFiles = true) => {
     if (selectedAssetIds.length === 0) return;
-    if (!window.confirm(`Delete ${selectedAssetIds.length} selected artwork(s)${deleteFiles ? ' and remove from disk' : ''}?`)) {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete ${selectedAssetIds.length} selected artwork(s)?\n\nAll artwork files and previews will be permanently removed from your vault and deleted from cloud storage.`
+      )
+    ) {
       return;
     }
+    let deletedCount = 0;
     for (const id of selectedAssetIds) {
-      await Art2dService.deleteAsset(id, deleteFiles);
+      try {
+        const res = await Art2dService.deleteAsset(id, deleteFiles);
+        if (res.success) deletedCount++;
+      } catch (e) {
+        console.error('Failed to delete artwork:', id, e);
+      }
     }
     setAssets((prev) => prev.filter((a) => !selectedAssetIds.includes(a.id)));
     setSelectedAssetIds([]);
-    showNotice(`Deleted ${selectedAssetIds.length} artworks`);
+    showNotice(`Deleted ${deletedCount} artwork(s) from vault & cloud`);
   };
 
   // Batch category change
@@ -671,16 +698,6 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragOver(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-          setIsDragOver(false);
-        }
-      }}
-      onDrop={handleDrop}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -1415,10 +1432,20 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => handleBatchDelete(false)}
-            style={{ fontSize: '0.775rem', padding: '5px 10px', color: '#f87171' }}
+            onClick={() => handleBatchDelete(true)}
+            style={{
+              fontSize: '0.775rem',
+              padding: '5px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              color: '#f87171',
+              borderColor: 'rgba(248, 113, 113, 0.4)',
+              backgroundColor: 'rgba(248, 113, 113, 0.1)',
+            }}
           >
-            Remove from Library
+            <Trash2 size={13} />
+            Delete Selected ({selectedAssetIds.length}) & Remove from Cloud
           </button>
 
           <button
@@ -1703,6 +1730,31 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
                       >
                         <ExternalLink size={13} />
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAsset(asset.id, true);
+                        }}
+                        title="Delete Artwork (removes from disk and cloud)"
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          color: '#f87171',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          padding: 0,
+                          backdropFilter: 'blur(6px)',
+                        }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
 
                     {/* Re-extracting Spinner */}
@@ -1929,6 +1981,15 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
                             style={{ padding: '4px' }}
                           >
                             <ExternalLink size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            onClick={() => handleDeleteAsset(asset.id, true)}
+                            title="Delete Artwork (removes from disk and cloud)"
+                            style={{ padding: '4px', color: '#f87171' }}
+                          >
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
@@ -2420,7 +2481,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
               <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
                 <button
                   type="button"
-                  onClick={() => handleDeleteAsset(detailAsset.id, false)}
+                  onClick={() => handleDeleteAsset(detailAsset.id, true)}
                   style={{
                     backgroundColor: 'transparent',
                     border: 'none',
@@ -2434,7 +2495,7 @@ export const Art2DStudioView: React.FC<Art2DStudioViewProps> = ({
                   }}
                 >
                   <Trash2 size={14} />
-                  Delete Artwork
+                  Delete Artwork & Remove from Cloud
                 </button>
 
                 <button

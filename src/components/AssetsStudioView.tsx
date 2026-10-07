@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { BlenderAsset } from '../types';
 import { AssetsService } from '../services/assetsService';
+import { routeAndImportFiles, setActive3DFolder } from '../services/fileDropRouter';
 
 interface AssetsStudioViewProps {
   isStudioSidebarCollapsed?: boolean;
@@ -59,6 +60,7 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [renderingAssetId, setRenderingAssetId] = useState<string | null>(null);
+  const [isBatchRendering, setIsBatchRendering] = useState<boolean>(false);
   const [detailAsset, setDetailAsset] = useState<BlenderAsset | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,11 +107,24 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
 
   useEffect(() => {
     loadAssets();
+    const handleAssetsUpdated = () => {
+      loadAssets();
+    };
+    window.addEventListener('albaqros-assets-updated', handleAssetsUpdated);
+    return () => {
+      window.removeEventListener('albaqros-assets-updated', handleAssetsUpdated);
+    };
   }, [loadAssets]);
+
+  // Synchronize active folder so global drag & drop automatically saves into this folder
+  useEffect(() => {
+    setActive3DFolder(selectedFolder || undefined);
+    return () => setActive3DFolder(undefined);
+  }, [selectedFolder]);
 
   const showNotice = (msg: string) => {
     setNotice(msg);
-    setTimeout(() => setNotice(null), 3500);
+    setTimeout(() => setNotice(null), 4000);
   };
 
   // Import handler
@@ -130,32 +145,38 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
   // Drag and drop handler
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(false);
     if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
 
-    const files = Array.from(e.dataTransfer.files);
-    let importedCount = 0;
     const targetFolder = selectedFolder && selectedFolder !== '' ? selectedFolder : undefined;
+    showNotice(`Processing ${e.dataTransfer.files.length} dropped file(s)...`);
 
-    for (const file of files) {
-      const pathOnDisk = (file as any).path;
-      if (pathOnDisk && pathOnDisk.toLowerCase().endsWith('.blend')) {
-        showNotice(`Rendering 3/4 preview for ${file.name}...`);
-        const res = await AssetsService.importAsset({
-          sourceFilePath: pathOnDisk,
-          name: file.name.replace(/\.blend$/i, ''),
-          category: selectedCategory !== 'All' ? selectedCategory : 'Props',
-          folder: targetFolder,
-          copyToVault: true,
-        });
-        if (res.success) importedCount++;
+    try {
+      const summary = await routeAndImportFiles(e.dataTransfer.files, {
+        default3DFolder: targetFolder,
+        default3DCategory: selectedCategory !== 'All' ? selectedCategory : 'Props',
+        onProgress: (current, total, name) => {
+          showNotice(`Importing (${current}/${total}): ${name}...`);
+        },
+      });
+
+      if (summary.totalSuccess > 0) {
+        const msgParts: string[] = [];
+        if (summary.imported3D.length > 0) {
+          const dest = targetFolder ? ` into "${targetFolder}"` : '';
+          msgParts.push(`${summary.imported3D.length} 3D model(s)${dest}`);
+        }
+        if (summary.imported2D.length > 0) {
+          msgParts.push(`${summary.imported2D.length} artwork(s) to 2D Art Library`);
+        }
+        showNotice(`✨ Saved ${msgParts.join(' & ')}!`);
+        await loadAssets();
+      } else if (summary.unsupportedNames.length > 0) {
+        showNotice(`No supported 3D or 2D media recognized in dropped file(s)`);
       }
-    }
-
-    if (importedCount > 0) {
-      const dest = targetFolder ? ` into "${targetFolder}"` : '';
-      showNotice(`Successfully imported and rendered ${importedCount} model(s)${dest}!`);
-      await loadAssets();
+    } catch (err: any) {
+      showNotice('Drop import error: ' + err.message);
     }
   };
 
@@ -238,7 +259,7 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
   const handleReRender = async (asset: BlenderAsset, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setRenderingAssetId(asset.id);
-    showNotice(`Blender rendering 3/4 preview for "${asset.name}"...`);
+    showNotice(`Blender rendering 3/4 preview with materials for "${asset.name}"...`);
     try {
       const res = await AssetsService.renderPreview(asset.id);
       if (res.success && res.asset) {
@@ -246,7 +267,7 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
         if (detailAsset && detailAsset.id === asset.id) {
           setDetailAsset(res.asset);
         }
-        showNotice(`3/4 preview updated for "${asset.name}"`);
+        showNotice(`3/4 preview updated with materials for "${asset.name}"`);
       } else {
         showNotice('Render failed: ' + (res.error || 'Unknown error'));
       }
@@ -337,8 +358,10 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
   };
 
   // Delete asset
-  const handleDeleteAsset = async (assetId: string, deleteFile = false) => {
-    if (!window.confirm(`Delete this model from your library${deleteFile ? ' and remove from disk' : ''}?`)) {
+  const handleDeleteAsset = async (assetId: string, deleteFile = true) => {
+    const targetAsset = assets.find((a) => a.id === assetId);
+    const assetName = targetAsset ? targetAsset.name : 'this model';
+    if (!window.confirm(`Delete "${assetName}"?\n\nThe file will be permanently removed from your vault and deleted from cloud storage.`)) {
       return;
     }
     try {
@@ -349,11 +372,37 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
         if (detailAsset?.id === assetId) {
           setDetailAsset(null);
         }
-        showNotice('Asset removed from library');
+        showNotice('Model deleted from library & cloud');
+      } else {
+        showNotice('Failed to delete asset: ' + (res.error || 'Unknown error'));
       }
     } catch (err: any) {
       showNotice('Failed to delete asset: ' + err.message);
     }
+  };
+
+  // Batch delete assets
+  const handleBatchDelete = async (deleteFiles = true) => {
+    if (selectedAssetIds.length === 0) return;
+    if (
+      !window.confirm(
+        `Are you sure you want to delete ${selectedAssetIds.length} selected 3D model(s)?\n\nAll model files and renders will be permanently removed from your vault and deleted from cloud storage.`
+      )
+    ) {
+      return;
+    }
+    let deletedCount = 0;
+    for (const id of selectedAssetIds) {
+      try {
+        const res = await AssetsService.deleteAsset(id, deleteFiles);
+        if (res.success) deletedCount++;
+      } catch (e) {
+        console.error('Failed to delete asset:', id, e);
+      }
+    }
+    setAssets((prev) => prev.filter((a) => !selectedAssetIds.includes(a.id)));
+    setSelectedAssetIds([]);
+    showNotice(`Deleted ${deletedCount} 3D model(s) from vault & cloud`);
   };
 
   // Multi-select helpers
@@ -426,18 +475,43 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
     return assets.reduce((sum, a) => sum + (a.metadata?.vertexCount || 0), 0);
   }, [assets]);
 
+  // Batch re-render previews with materials
+  const handleBatchReRender = async (targetIds?: string[]) => {
+    const ids =
+      targetIds && targetIds.length > 0
+        ? targetIds
+        : selectedAssetIds.length > 0
+        ? selectedAssetIds
+        : filteredAssets.map((a) => a.id);
+
+    if (ids.length === 0) {
+      showNotice('No models to re-render.');
+      return;
+    }
+
+    setIsBatchRendering(true);
+    showNotice(`Blender rendering ${ids.length} preview(s) with materials...`);
+    try {
+      const res = await AssetsService.batchRenderPreviews(ids);
+      if (res.success && res.assets) {
+        setAssets(res.assets);
+        if (detailAsset) {
+          const updatedDetail = res.assets.find((a) => a.id === detailAsset.id);
+          if (updatedDetail) setDetailAsset(updatedDetail);
+        }
+        showNotice(`Rendered ${res.updatedCount ?? ids.length} preview(s) with materials!`);
+      } else {
+        showNotice('Batch render failed: ' + (res.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      showNotice('Batch render error: ' + err.message);
+    } finally {
+      setIsBatchRendering(false);
+    }
+  };
+
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragOver(true);
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-          setIsDragOver(false);
-        }
-      }}
-      onDrop={handleDrop}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -605,6 +679,18 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                 Verts
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => handleBatchReRender()}
+              className="btn-secondary"
+              disabled={isBatchRendering || assets.length === 0}
+              title="Re-render all 3D asset previews with current materials and studio lighting"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
+            >
+              <RotateCw size={14} className={isBatchRendering ? 'animate-spin' : ''} />
+              {isBatchRendering ? 'Rendering...' : 'Re-render Previews'}
+            </button>
 
             <button
               type="button"
@@ -1008,6 +1094,26 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
               <button
                 type="button"
                 className="btn-secondary"
+                disabled={isBatchRendering}
+                onClick={() => handleBatchReRender(selectedAssetIds)}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.775rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: '#38bdf8',
+                  borderColor: 'rgba(56, 189, 248, 0.4)',
+                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                }}
+              >
+                <RotateCw size={13} className={isBatchRendering ? 'animate-spin' : ''} />
+                Re-render Selected ({selectedAssetIds.length})
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
                 onClick={() => {
                   setBatchTargetFolder(selectedFolder || '');
                   setIsBatchMoveModalOpen(true);
@@ -1021,6 +1127,24 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                 }}
               >
                 <Move size={14} /> Move to Folder
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => handleBatchDelete(true)}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.775rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: '#f87171',
+                  borderColor: 'rgba(248, 113, 113, 0.4)',
+                  backgroundColor: 'rgba(248, 113, 113, 0.1)',
+                }}
+              >
+                <Trash2 size={13} /> Delete Selected ({selectedAssetIds.length}) & Remove from Cloud
               </button>
 
               <button
@@ -1402,11 +1526,25 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                         <button
                           type="button"
                           onClick={(e) => handleReRender(asset, e)}
-                          title="Re-render 3/4 preview with Blender"
+                          title="Re-render 3/4 preview with materials"
+                          disabled={isRendering}
                           className="btn-icon"
                           style={{ width: '28px', height: '28px', padding: 0 }}
                         >
-                          <RotateCw size={14} />
+                          <RotateCw size={14} className={isRendering ? 'animate-spin' : ''} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteAsset(asset.id, true);
+                          }}
+                          title="Delete 3D Model (removes from disk and cloud)"
+                          className="btn-icon"
+                          style={{ width: '28px', height: '28px', padding: 0, color: '#ef4444' }}
+                        >
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
@@ -1575,18 +1713,19 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                             type="button"
                             onClick={(e) => handleReRender(asset, e)}
                             className="btn-icon"
-                            title="Re-render 3/4 Preview"
+                            disabled={renderingAssetId === asset.id}
+                            title="Re-render 3/4 Preview with materials"
                           >
-                            <RotateCw size={14} />
+                            <RotateCw size={14} className={renderingAssetId === asset.id ? 'animate-spin' : ''} />
                           </button>
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteAsset(asset.id, false);
+                              handleDeleteAsset(asset.id, true);
                             }}
                             className="btn-icon"
-                            title="Delete"
+                            title="Delete 3D Model (removes from disk and cloud)"
                           >
                             <Trash2 size={14} color="#ef4444" />
                           </button>
@@ -1748,10 +1887,12 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleReRender(detailAsset)}
+                    disabled={renderingAssetId === detailAsset.id}
                     className="btn-secondary"
                     style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.775rem' }}
                   >
-                    <RotateCw size={13} /> Re-render 3/4 Preview
+                    <RotateCw size={13} className={renderingAssetId === detailAsset.id ? 'animate-spin' : ''} />
+                    {renderingAssetId === detailAsset.id ? 'Rendering...' : 'Re-render with Materials'}
                   </button>
 
                   <button
@@ -1964,7 +2105,7 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '10px' }}>
                   <button
                     type="button"
-                    onClick={() => handleDeleteAsset(detailAsset.id, false)}
+                    onClick={() => handleDeleteAsset(detailAsset.id, true)}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -1976,7 +2117,7 @@ export const AssetsStudioView: React.FC<AssetsStudioViewProps> = ({
                       gap: '4px',
                     }}
                   >
-                    <Trash2 size={13} /> Remove from Library
+                    <Trash2 size={13} /> Delete Model & Remove from Cloud
                   </button>
 
                   <button

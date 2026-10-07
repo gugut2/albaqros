@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus,
   X,
-  Zap,
-  Coffee,
   Star,
   RotateCcw,
   Calendar,
@@ -11,8 +9,9 @@ import {
   ListTree,
   Edit3,
   CalendarClock,
+  Pause,
 } from 'lucide-react';
-import { EnergyLevel, MajorTask, RecurrenceRule, RecurrenceType, Subtask, Task } from '../types';
+import { MajorTask, RecurrenceRule, RecurrenceType, Subtask, Task } from '../types';
 
 export interface TaskCreateModalProps {
   isOpen: boolean;
@@ -45,7 +44,6 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
   const [theme, setTheme] = useState(themes[0] || 'Work');
   const [customThemeInput, setCustomThemeInput] = useState('');
   const [isCreatingTheme, setIsCreatingTheme] = useState(false);
-  const [energy, setEnergy] = useState<EnergyLevel>('normal');
   const [isTopFocus, setIsTopFocus] = useState(false);
   const [taskDate, setTaskDate] = useState(currentDate);
   const [notes, setNotes] = useState('');
@@ -71,7 +69,6 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
       setTitle(editingTask.title);
       setSelectedMajorTaskId(editingTask.majorTaskId || '');
       setTheme(editingTask.theme || themes[0] || 'Work');
-      setEnergy(editingTask.energy || 'normal');
       setIsTopFocus(Boolean(editingTask.isTopFocus));
       setTaskDate(editingTask.date || currentDate);
       setNotes(editingTask.notes || '');
@@ -109,7 +106,6 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
       setTitle('');
       setSelectedMajorTaskId('');
       setTheme(themes[0] || 'Work');
-      setEnergy('normal');
       setIsTopFocus(false);
       setTaskDate(currentDate);
       setNotes('');
@@ -178,7 +174,6 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
     const taskPayload = {
       title: title.trim(),
       theme: theme.trim() || 'General',
-      energy,
       isTopFocus,
       completed: editingTask ? isCompleted : false,
       date: taskDate || currentDate,
@@ -518,110 +513,68 @@ export const TaskCreateModal: React.FC<TaskCreateModalProps> = ({
                 <option value="">None (Standalone Daily Task)</option>
                 {majorTasks.map((major) => (
                   <option key={major.id} value={major.id}>
-                    🎯 {major.title} (#{major.theme})
+                    {major.paused ? '⏸️' : '🎯'} {major.title} (#{major.theme}){major.paused ? ' [Paused]' : ''}
                   </option>
                 ))}
               </select>
+
+              {selectedMajorTaskId && majorTasks.find((m) => m.id === selectedMajorTaskId)?.paused && (
+                <div
+                  style={{
+                    marginTop: '6px',
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    fontSize: '0.75rem',
+                    color: '#fbbf24',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <Pause size={12} />
+                  <span>This project is paused. This task will be saved with the project, but won't appear in the dailies until resumed.</span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Energy Intensity & Top Focus Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            {/* Energy Level */}
-            <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '0.775rem',
-                  fontWeight: 600,
-                  color: 'var(--text-secondary)',
-                  marginBottom: '6px',
-                }}
-              >
-                ENERGY INTENSITY
-              </label>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setEnergy(energy === 'high' ? 'normal' : 'high')}
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '8px',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    border: energy === 'high' ? '1px solid #ef4444' : '1px solid var(--border-subtle)',
-                    backgroundColor: energy === 'high' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                    color: energy === 'high' ? '#f87171' : 'var(--text-secondary)',
-                  }}
-                >
-                  <Zap size={12} /> Heavy ⚡
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEnergy(energy === 'low' ? 'normal' : 'low')}
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '4px',
-                    padding: '8px',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    border: energy === 'low' ? '1px solid #10b981' : '1px solid var(--border-subtle)',
-                    backgroundColor: energy === 'low' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                    color: energy === 'low' ? '#34d399' : 'var(--text-secondary)',
-                  }}
-                >
-                  <Coffee size={12} /> Light ☕
-                </button>
-              </div>
-            </div>
-
-            {/* Top Focus Toggle */}
-            <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '0.775rem',
-                  fontWeight: 600,
-                  color: 'var(--text-secondary)',
-                  marginBottom: '6px',
-                }}
-              >
-                TODAY'S #1 FOCUS
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsTopFocus(!isTopFocus)}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  padding: '8px',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  border: isTopFocus ? '1px solid #facc15' : '1px solid var(--border-subtle)',
-                  backgroundColor: isTopFocus ? 'rgba(250, 204, 21, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                  color: isTopFocus ? '#facc15' : 'var(--text-secondary)',
-                }}
-              >
-                <Star size={12} fill={isTopFocus ? '#facc15' : 'transparent'} />
-                {isTopFocus ? 'Pinned Focus ⭐' : 'Regular Task'}
-              </button>
-            </div>
+          {/* Top Focus Toggle */}
+          <div>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.775rem',
+                fontWeight: 600,
+                color: 'var(--text-secondary)',
+                marginBottom: '6px',
+              }}
+            >
+              TODAY'S #1 FOCUS
+            </label>
+            <button
+              type="button"
+              onClick={() => setIsTopFocus(!isTopFocus)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: isTopFocus ? '1px solid #facc15' : '1px solid var(--border-subtle)',
+                backgroundColor: isTopFocus ? 'rgba(250, 204, 21, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                color: isTopFocus ? '#facc15' : 'var(--text-secondary)',
+              }}
+            >
+              <Star size={12} fill={isTopFocus ? '#facc15' : 'transparent'} />
+              {isTopFocus ? 'Pinned Focus ⭐' : 'Regular Task'}
+            </button>
           </div>
 
           {/* Multi-Day Task Toggle */}

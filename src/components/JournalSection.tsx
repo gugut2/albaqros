@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, Check, Zap, List, Plus } from 'lucide-react';
+import { BookOpen, Check, List, Plus } from 'lucide-react';
 import { DayEntry } from '../types';
 
 interface JournalSectionProps {
   entry?: DayEntry;
   dateStr: string;
   onUpdateJournal: (dateStr: string, text: string) => void;
-  onUpdateEnergy: (dateStr: string, level: number) => void;
   isCompact?: boolean;
 }
 
@@ -14,7 +13,6 @@ export const JournalSection: React.FC<JournalSectionProps> = ({
   entry,
   dateStr,
   onUpdateJournal,
-  onUpdateEnergy,
   isCompact = false,
 }) => {
   const [content, setContent] = useState(entry?.journal || '');
@@ -185,10 +183,8 @@ export const JournalSection: React.FC<JournalSectionProps> = ({
     setTimeout(() => setIsSaved(true), 300);
   };
 
-  const energyLevel = entry?.energyLevel || 3;
   const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
   const bulletCount = (content.match(/•/g) || []).length;
-  const energyLabels = ['Drained', 'Low', 'Balanced', 'High Focus', 'Peak Flow'];
 
   return (
     <div
@@ -282,50 +278,6 @@ export const JournalSection: React.FC<JournalSectionProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Energy Spark Slider / Dots */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '6px 10px',
-          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-subtle)',
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-          <Zap size={12} color="#f59e0b" />
-          Energy: <strong style={{ color: 'var(--text-primary)', marginLeft: '2px' }}>{energyLabels[energyLevel - 1]}</strong>
-        </span>
-
-        <div style={{ display: 'flex', gap: '4px' }}>
-          {[1, 2, 3, 4, 5].map((lvl) => {
-            const isSelected = lvl <= energyLevel;
-            return (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => onUpdateEnergy(dateStr, lvl)}
-                title={`Level ${lvl}: ${energyLabels[lvl - 1]}`}
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  borderRadius: '3px',
-                  border: 'none',
-                  backgroundColor: isSelected ? '#f59e0b' : 'rgba(255, 255, 255, 0.1)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  opacity: isSelected ? 1 : 0.4,
-                }}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Textarea with Smart Bullet Handling */}
       <textarea
         ref={textareaRef}
         value={content}

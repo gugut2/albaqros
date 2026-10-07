@@ -150,7 +150,6 @@ export function getEffectiveDayEntry(
     : {
         date: dateStr,
         journal: '',
-        energyLevel: 3,
         updatedAt: '',
       };
 

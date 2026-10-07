@@ -111,23 +111,33 @@ async function main() {
     process.exit(1);
   }
 
-  const releaseTitle = `Albaqros v${version} - Detached Floating Note Windows & Multi-Tab Multitasking`;
+  const releaseTitle = `Albaqros v${version} - Global Drag-and-Drop Router, Project Pausing & Default Window Mode`;
   const releaseNotes = `## What's New in Albaqros v${version} 🦅
 
-### 🪟 Detached Floating Note Windows
-- **Pop Out Any Note into its Own Window**:
-  - Pop out any note into an independent, frameless desktop window from either the note editor toolbar (**Pop Out**) or directly from the Knowledge & Notes sidebar.
-  - Work across multiple Albaqros tabs simultaneously—keep your popped-out note open while exploring the **Canvas**, organizing **3D Assets**, reviewing **2D Art**, or checking daily **Tasks**.
-- **Always on Top Pin**:
-  - Pin the floating note to keep it visible on top of all applications (Blender, Krita, Photoshop, IDE, browser).
-- **Full Live Markdown Editor**:
-  - Retains all live formatting, nested sub-bullet indentation (\`Tab\` / \`Shift+Tab\`), \`[[\` autocomplete popup, tags, and character/word stats in the detached window.
-- **Dock Back to Albaqros (\`Ctrl+Shift+D\`)**:
-  - Seamlessly dock the note back into the main Albaqros window with one click or hotkey.
-  - Auto-flushes any unsaved edits, closes the floating window, brings Albaqros to the foreground in Maximized Studio mode on the Notes tab, and focuses the note.
-- **Instant Multi-Window Synchronization**:
-  - Changes made in either window immediately persist to disk and broadcast across all open windows.
-  - Renaming, deleting, or editing notes reflects live across every window.
+### 🎯 Global Drag-and-Drop Asset Router
+- **Drag-and-Drop Anywhere**:
+  - Drag and drop 3D assets (\`.blend\`, \`.obj\`, \`.fbx\`, \`.gltf\`, \`.glb\`) or 2D artwork & textures (\`.kra\`, \`.psd\`, \`.png\`, \`.jpg\`, \`.webp\`, etc.) anywhere on Albaqros to automatically route and save them into the correct studio library.
+- **Glass Drop Overlay & Live Progress**:
+  - Displays a responsive dropzone with file type detection, real-time import progress notifications, and 1-click navigation buttons directly to the target library.
+
+### ⏸️ Project Pause & Resume Controls
+- **Pause Major Projects / Goals**:
+  - Put major goals and their linked tasks on pause with one click.
+  - Paused projects suppress linked daily tasks from cluttering the daily focus checklist, carryover rollovers, and history views until resumed.
+  - Project cadence displays clear \`⏸️ Project Paused\` status badges instead of false overdue warnings.
+  - Dedicated filter bar in the Major Goals view to view All, Active, Paused, or Completed projects.
+
+### 🖥️ Main Window Default Version Selector
+- **Configurable Startup Mode**:
+  - Select whether Albaqros defaults to the compact floating side widget (420×680) or the maximized studio workspace (1240×840 centered) under Settings -> Desktop Behaviors.
+  - Electron window creation directly applies the saved mode on boot, eliminating flickering or screen jumps.
+  - Manual session toggles via the title bar switch views without overwriting your saved default preference.
+
+### ⚡ Streamlined Focus & Analytics (Energy Evaluation Removed)
+- **Simpler, Distraction-Free Daily Flow**:
+  - Completely removed the redundant energy intensity ratings, mood dots, and energy distribution donut charts from tasks, notes, and analytics.
+  - Task creation and daily headers are streamlined for immediate task capture.
+  - Analytics view highlights **Current Streak**, **Total Completed Tasks**, **Completion Rate**, and full-width **Consistency by Life Facet**.
 
 ---
 

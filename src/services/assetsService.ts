@@ -124,6 +124,18 @@ export const AssetsService = {
     return { success: false, error: 'Preview rendering requires Electron desktop app with Blender.' };
   },
 
+  async batchRenderPreviews(assetIds?: string[]): Promise<{ success: boolean; updatedCount?: number; assets?: BlenderAsset[]; error?: string }> {
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.batchRenderPreviews) {
+      try {
+        return await (window as any).electronAPI.assets.batchRenderPreviews(assetIds);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+    }
+
+    return { success: false, error: 'Batch rendering requires Electron desktop app with Blender.' };
+  },
+
   async updateAsset(asset: BlenderAsset): Promise<{ success: boolean; asset?: BlenderAsset; error?: string }> {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.assets?.updateAsset) {
       try {

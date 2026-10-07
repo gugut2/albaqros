@@ -26,7 +26,6 @@ const defaultSettings: AppSettings = {
   runOnStartup: true,
   alwaysOnTop: false,
   compactMode: true, // Opens in Widget Mode by default on first launch
-  defaultEnergyFilter: 'all',
 };
 
 export const DEFAULT_DAILY_PROPERTIES: DailyPropertyDefinition[] = [
@@ -90,7 +89,6 @@ function createInitialData(): AppData {
       id: 'task-north-star',
       title: 'Finalize the Q3 core roadmap & project spec',
       theme: 'Work',
-      energy: 'high',
       isTopFocus: true,
       completed: false,
       date: today,
@@ -103,7 +101,6 @@ function createInitialData(): AppData {
       id: 'task-workout',
       title: 'Morning 30-minute interval run & stretch',
       theme: 'Health',
-      energy: 'high',
       isTopFocus: false,
       completed: true,
       completedAt: new Date().toISOString(),
@@ -121,7 +118,6 @@ function createInitialData(): AppData {
       id: 'task-chore-stale',
       title: 'Deep clean & descale espresso machine',
       theme: 'Chores',
-      energy: 'low',
       isTopFocus: false,
       completed: false,
       date: today,
@@ -138,7 +134,6 @@ function createInitialData(): AppData {
       id: 'task-meditate',
       title: 'Evening 10m mindful breathing & posture check',
       theme: 'Health',
-      energy: 'low',
       isTopFocus: false,
       completed: false,
       date: today,
@@ -153,7 +148,6 @@ function createInitialData(): AppData {
       id: 'task-plants',
       title: 'Water balcony ferns & indoor monstera',
       theme: 'Chores',
-      energy: 'low',
       isTopFocus: false,
       completed: false,
       date: today,
@@ -170,7 +164,6 @@ function createInitialData(): AppData {
       id: 'past-1',
       title: 'Review engineering pull requests & deploy to staging',
       theme: 'Work',
-      energy: 'high',
       isTopFocus: true,
       completed: true,
       completedAt: new Date(Date.now() - 86400000).toISOString(),
@@ -182,7 +175,6 @@ function createInitialData(): AppData {
       id: 'past-2',
       title: 'Cook balanced meal & prep lunch boxes',
       theme: 'Health',
-      energy: 'low',
       isTopFocus: false,
       completed: true,
       completedAt: new Date(Date.now() - 86400000).toISOString(),
@@ -194,7 +186,6 @@ function createInitialData(): AppData {
       id: 'past-3',
       title: 'Organize workspace desk & wipe monitors',
       theme: 'Chores',
-      energy: 'low',
       isTopFocus: false,
       completed: true,
       completedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
@@ -207,8 +198,7 @@ function createInitialData(): AppData {
   const initialEntries: Record<string, DayEntry> = {
     [today]: {
       date: today,
-      journal: 'Starting the week with clear focus. Prioritizing deep work in the morning before tackling inbox triage. Energy feels solid.',
-      energyLevel: 4,
+      journal: 'Starting the week with clear focus. Prioritizing deep work in the morning before tackling inbox triage.',
       properties: {
         'prop-weight': 74.2,
         'prop-investments': 18500,
@@ -228,7 +218,6 @@ function createInitialData(): AppData {
     [yesterdayStr]: {
       date: yesterdayStr,
       journal: 'Solid progress on the roadmap. Kept phone away during focus blocks which helped tremendously.',
-      energyLevel: 5,
       properties: {
         'prop-weight': 74.5,
         'prop-investments': 18250,

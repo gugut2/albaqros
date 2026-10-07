@@ -33,7 +33,7 @@ export interface Task {
   id: string;
   title: string;
   theme: string; // e.g., 'Work', 'Health', 'Chores', 'Personal'
-  energy: EnergyLevel; // 'high' (⚡) | 'low' (☕) | 'normal'
+  energy?: EnergyLevel; // Optional legacy field
   isTopFocus: boolean; // Pinned #1 North Star focus
   completed: boolean;
   completedAt?: string; // ISO string
@@ -76,6 +76,7 @@ export interface MajorTask {
   theme: string;
   completed: boolean;
   completedAt?: string;
+  paused?: boolean; // When paused, linked tasks stop appearing in dailies
   createdAt: string;
   targetDate?: string; // Optional target completion date YYYY-MM-DD
   color?: string;
@@ -172,7 +173,7 @@ export interface AppSettings {
   runOnStartup: boolean;
   alwaysOnTop: boolean;
   compactMode: boolean;
-  defaultEnergyFilter: 'all' | 'high' | 'low';
+  defaultEnergyFilter?: 'all' | 'high' | 'low';
 }
 
 export interface AppData {
