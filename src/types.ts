@@ -386,4 +386,60 @@ export interface Art2DAsset {
   software?: Art2DSoftware;
 }
 
+// ==========================================
+// Project Vault & Workspace Types (Multi-Machine Portability)
+// ==========================================
 
+export type ProjectType =
+  | 'godot'
+  | 'blender'
+  | 'unity'
+  | 'unreal'
+  | 'web'
+  | 'python'
+  | 'custom';
+
+export type ProjectStatus = 'active' | 'in-progress' | 'completed' | 'on-hold' | 'archived';
+
+export interface ProjectDependency {
+  name: string;
+  type: 'addon' | 'package' | 'library' | 'external-link' | 'asset' | 'other';
+  version?: string;
+  path?: string;
+  description?: string;
+}
+
+export interface ProjectFileEntry {
+  name: string;
+  relativePath: string;
+  isDirectory: boolean;
+  sizeBytes?: number;
+  extension?: string;
+}
+
+export interface ProjectWorkspace {
+  id: string; // unique ID e.g. "proj-1729000000000-xyz"
+  name: string; // display name e.g. "My Godot Game"
+  slug: string; // folder name inside vault/projects/
+  type: ProjectType; // 'godot', 'blender', etc.
+  path: string; // absolute path on the current machine
+  relativePath: string; // relative to vault projects/ (guarantees cross-machine path stability)
+  isInsideVault: boolean; // true if stored directly in vault (synced across all machines)
+  primaryFile?: string; // e.g. "project.godot", "main.blend", "package.json"
+  previewUrl?: string; // Base64 data URL (icon.svg/png, blender preview, or custom)
+  previewPath?: string; // Path on disk to rendered/cached preview
+  totalSizeBytes: number; // Sum size of all project files + dependencies
+  fileCount: number; // Total files in project
+  folderCount: number; // Total folders
+  category: string; // e.g. "Game Dev", "3D Art & Animation", "Tools & Software", "Audio & VFX", "Experiments"
+  tags: string[]; // e.g. ["#godot4", "#gamedev", "#pixelart"]
+  status: ProjectStatus; // 'active', 'in-progress', etc.
+  engineVersion?: string; // e.g. "Godot 4.3", "Blender 4.2", "Node.js 20"
+  hasGit?: boolean; // Whether .git repo exists in project
+  dependencies: ProjectDependency[]; // Detected addons / packages / libraries
+  notes?: string; // Markdown notes, design document, devlog
+  linkedMajorTaskId?: string; // Optional link to MajorTask / Goal
+  createdAt: string; // ISO date string
+  updatedAt: string; // ISO date string
+  lastOpenedAt?: string; // ISO date string
+}

@@ -52,7 +52,7 @@ export const App: React.FC = () => {
     onAction?: () => void;
     isProcessing?: boolean;
   } | null>(null);
-  const [targetStudioTab, setTargetStudioTab] = useState<'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null>(null);
+  const [targetStudioTab, setTargetStudioTab] = useState<'today' | 'major' | 'art2d' | 'assets' | 'projects' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null>(null);
 
   // Global drag-and-drop listener to auto-sort 3D & 2D files from Windows Explorer into libraries
   useEffect(() => {
@@ -1422,6 +1422,8 @@ export const App: React.FC = () => {
                 setTargetStudioTab(null);
               }
             }}
+            vaultPath={vaultInfo?.path}
+            vaultName={vaultInfo?.name}
           />
         )}
       </div>

@@ -19,6 +19,7 @@ import {
   LayoutGrid,
   Box,
   Palette,
+  FolderGit2,
 } from 'lucide-react';
 import { AppData, DayEntry, MajorTask, Task, ProjectArtifact } from '../types';
 import { TaskItem } from './TaskItem';
@@ -30,6 +31,7 @@ import { NotesStudioView } from './NotesStudioView';
 import { CanvasStudioView } from './CanvasStudioView';
 import { AssetsStudioView } from './AssetsStudioView';
 import { Art2DStudioView } from './Art2DStudioView';
+import { ProjectsStudioView } from './ProjectsStudioView';
 import { DailyRemindersCard } from './DailyRemindersCard';
 import { DailyPropertiesCard } from './DailyPropertiesCard';
 import { formatDateLabel, getTodayString } from '../services/storage';
@@ -75,11 +77,13 @@ interface MaximizedViewProps {
   onOpenManageProperties?: () => void;
   onOpenManageReminders?: () => void;
   initialNotePath?: string | null;
-  targetTab?: 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null;
-  onActiveTabChange?: (tab: 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring') => void;
+  targetTab?: 'today' | 'major' | 'art2d' | 'assets' | 'projects' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring' | null;
+  onActiveTabChange?: (tab: 'today' | 'major' | 'art2d' | 'assets' | 'projects' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring') => void;
+  vaultPath?: string;
+  vaultName?: string;
 }
 
-type StudioTab = 'today' | 'major' | 'art2d' | 'assets' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
+type StudioTab = 'today' | 'major' | 'art2d' | 'assets' | 'projects' | 'notes' | 'canvas' | 'analytics' | 'history' | 'recurring';
 
 export const MaximizedView: React.FC<MaximizedViewProps> = ({
   currentDate,
@@ -123,6 +127,8 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
   initialNotePath,
   targetTab,
   onActiveTabChange,
+  vaultPath,
+  vaultName,
 }) => {
   const [activeTab, setActiveTabState] = useState<StudioTab>('today');
 
@@ -346,6 +352,29 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
           >
             <Box size={16} color={activeTab === 'assets' ? '#fb923c' : 'currentColor'} />
             3D Asset Library
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('projects')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: 'none',
+              backgroundColor: activeTab === 'projects' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+              color: activeTab === 'projects' ? '#ffffff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'projects' ? 600 : 500,
+              fontSize: '0.85rem',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <FolderGit2 size={16} color={activeTab === 'projects' ? '#38bdf8' : 'currentColor'} />
+            Projects Vault
           </button>
 
           <button
@@ -896,6 +925,17 @@ export const MaximizedView: React.FC<MaximizedViewProps> = ({
             <AssetsStudioView
               isStudioSidebarCollapsed={isStudioSidebarCollapsed}
               onToggleStudioSidebar={toggleStudioSidebar}
+            />
+          </div>
+        )}
+
+        {activeTab === 'projects' && (
+          <div style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+            <ProjectsStudioView
+              isStudioSidebarCollapsed={isStudioSidebarCollapsed}
+              onToggleStudioSidebar={toggleStudioSidebar}
+              vaultPath={vaultPath}
+              vaultName={vaultName}
             />
           </div>
         )}

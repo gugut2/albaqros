@@ -22,6 +22,20 @@ const {
   inspectArtworkMetadata,
   extractAndSave2DPreview,
 } = require('./artAssetExtractor.cjs');
+const {
+  getVaultProjectsDirectory,
+  listProjects,
+  importProjectFolder,
+  createProjectScaffold,
+  updateProject,
+  deleteProject,
+  openProject,
+  exportProjectZip,
+  importProjectZip,
+  listProjectFiles,
+  readProjectFile,
+  saveProjectFile,
+} = require('./projectsManager.cjs');
 
 app.setName('Albaqros');
 if (process.platform === 'win32') {
@@ -3365,6 +3379,171 @@ ipcMain.handle('clipboard-read-text', async () => {
   } catch (err) {
     console.error('Error reading clipboard text:', err);
     return '';
+  }
+});
+
+// ==========================================
+// Whole Projects Vault & Multi-Machine Workspace IPC
+// ==========================================
+
+ipcMain.handle('projects-list', async () => {
+  try {
+    return await listProjects(getActiveVaultDirectory());
+  } catch (err) {
+    console.error('Error listing projects:', err);
+    return { success: false, error: err.message, projects: [] };
+  }
+});
+
+ipcMain.handle('projects-select-folder', async () => {
+  if (!mainWindow) return { success: false, error: 'No main window' };
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Project Directory to Save / Link to Albaqros',
+    properties: ['openDirectory'],
+  });
+  if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+    return { success: false, canceled: true };
+  }
+  return { success: true, folderPath: res.filePaths[0] };
+});
+
+ipcMain.handle('projects-import', async (_, params) => {
+  try {
+    return await importProjectFolder(getActiveVaultDirectory(), params);
+  } catch (err) {
+    console.error('Error importing project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-create', async (_, params) => {
+  try {
+    return await createProjectScaffold(getActiveVaultDirectory(), params);
+  } catch (err) {
+    console.error('Error creating project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-update', async (_, project) => {
+  try {
+    return updateProject(getActiveVaultDirectory(), project);
+  } catch (err) {
+    console.error('Error updating project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-delete', async (_, { projectId, deleteFiles }) => {
+  try {
+    return deleteProject(getActiveVaultDirectory(), { projectId, deleteFiles });
+  } catch (err) {
+    console.error('Error deleting project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-open', async (_, { projectId, openMethod }) => {
+  try {
+    return await openProject(getActiveVaultDirectory(), { projectId, openMethod });
+  } catch (err) {
+    console.error('Error opening project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-open-folder', async (_, projectId) => {
+  try {
+    return await openProject(getActiveVaultDirectory(), { projectId, openMethod: 'explorer' });
+  } catch (err) {
+    console.error('Error revealing project in explorer:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-open-terminal', async (_, projectId) => {
+  try {
+    return await openProject(getActiveVaultDirectory(), { projectId, openMethod: 'terminal' });
+  } catch (err) {
+    console.error('Error opening terminal for project:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-export-zip', async (_, projectId) => {
+  try {
+    if (!mainWindow) return { success: false, error: 'No main window' };
+    const saveRes = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Portable Project ZIP Archive (All Dependencies Included)',
+      defaultPath: `project-bundle-${Date.now()}.zip`,
+      filters: [{ name: 'Zip Archive (*.zip)', extensions: ['zip'] }],
+    });
+    if (saveRes.canceled || !saveRes.filePath) {
+      return { success: false, canceled: true };
+    }
+    return await exportProjectZip(getActiveVaultDirectory(), projectId, saveRes.filePath);
+  } catch (err) {
+    console.error('Error exporting project zip:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-import-zip', async () => {
+  try {
+    if (!mainWindow) return { success: false, error: 'No main window' };
+    const openRes = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Portable Project ZIP Archive to Import',
+      properties: ['openFile'],
+      filters: [
+        { name: 'ZIP Archives (*.zip)', extensions: ['zip'] },
+        { name: 'All Files (*.*)', extensions: ['*'] },
+      ],
+    });
+    if (openRes.canceled || !openRes.filePaths || openRes.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+    return await importProjectZip(getActiveVaultDirectory(), openRes.filePaths[0]);
+  } catch (err) {
+    console.error('Error importing project zip:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-list-files', async (_, { projectId, subpath }) => {
+  try {
+    return listProjectFiles(getActiveVaultDirectory(), projectId, subpath);
+  } catch (err) {
+    console.error('Error listing project files:', err);
+    return { success: false, error: err.message, files: [] };
+  }
+});
+
+ipcMain.handle('projects-read-file', async (_, { projectId, relativeFilePath }) => {
+  try {
+    return readProjectFile(getActiveVaultDirectory(), projectId, relativeFilePath);
+  } catch (err) {
+    console.error('Error reading project file:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-save-file', async (_, { projectId, relativeFilePath, content }) => {
+  try {
+    return saveProjectFile(getActiveVaultDirectory(), projectId, relativeFilePath, content);
+  } catch (err) {
+    console.error('Error saving project file:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('projects-open-vault-folder', async () => {
+  try {
+    const pDir = getVaultProjectsDirectory(getActiveVaultDirectory());
+    await shell.openPath(pDir);
+    return { success: true, path: pDir };
+  } catch (err) {
+    console.error('Error opening projects directory:', err);
+    return { success: false, error: err.message };
   }
 });
 

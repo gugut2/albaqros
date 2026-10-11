@@ -136,5 +136,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     moveAsset: (assetId, targetFolder) => ipcRenderer.invoke('art2d-move', { assetId, targetFolder }),
     deleteFolder: (folderPath) => ipcRenderer.invoke('art2d-delete-folder', folderPath),
   },
+  projects: {
+    listProjects: () => ipcRenderer.invoke('projects-list'),
+    selectProjectFolder: () => ipcRenderer.invoke('projects-select-folder'),
+    importProject: (params) => ipcRenderer.invoke('projects-import', params),
+    createProject: (params) => ipcRenderer.invoke('projects-create', params),
+    updateProject: (project) => ipcRenderer.invoke('projects-update', project),
+    deleteProject: (projectId, deleteFiles = false) =>
+      ipcRenderer.invoke('projects-delete', { projectId, deleteFiles }),
+    openProject: (projectId, openMethod = 'default') =>
+      ipcRenderer.invoke('projects-open', { projectId, openMethod }),
+    openFolder: (projectId) => ipcRenderer.invoke('projects-open-folder', projectId),
+    openTerminal: (projectId) => ipcRenderer.invoke('projects-open-terminal', projectId),
+    exportZip: (projectId) => ipcRenderer.invoke('projects-export-zip', projectId),
+    importZip: () => ipcRenderer.invoke('projects-import-zip'),
+    listFiles: (projectId, subpath) => ipcRenderer.invoke('projects-list-files', { projectId, subpath }),
+    readFile: (projectId, relativeFilePath) =>
+      ipcRenderer.invoke('projects-read-file', { projectId, relativeFilePath }),
+    saveFile: (projectId, relativeFilePath, content) =>
+      ipcRenderer.invoke('projects-save-file', { projectId, relativeFilePath, content }),
+    openVaultProjectsFolder: () => ipcRenderer.invoke('projects-open-vault-folder'),
+  },
 });
 
