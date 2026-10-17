@@ -21,6 +21,8 @@ import {
   FileText,
   Clock,
   Sparkles,
+  Undo,
+  Redo,
 } from 'lucide-react';
 import albaqrosLogo from '../../assets/icon.png';
 import { Note, NoteMetadata } from '../types';
@@ -33,6 +35,17 @@ import {
   isListItemEmpty,
   cleanAllEmptyListItems,
 } from '../services/markdownConverter';
+
+interface HistorySnapshot {
+  html: string;
+  selection: {
+    startPath: number[];
+    startOffset: number;
+    endPath: number[];
+    endOffset: number;
+  } | null;
+  timestamp: number;
+}
 
 interface DetachedNoteWindowProps {
   notePath: string;
@@ -71,10 +84,20 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
 
   // Editor refs & auto-save timer
   const editorRef = useRef<HTMLDivElement>(null);
+  const lastEditorHtmlRef = useRef<string>('');
   const lastRangeRef = useRef<Range | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const isDirtyRef = useRef<boolean>(false);
   const contentRef = useRef<string>('');
+
+  // Deep Undo / Redo history management (up to 150 snapshots)
+  const MAX_HISTORY_LENGTH = 150;
+  const undoStackRef = useRef<HistorySnapshot[]>([]);
+  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const isApplyingHistoryRef = useRef<boolean>(false);
+  const lastSnapshotTimeRef = useRef<number>(0);
+  const [canUndo, setCanUndo] = useState<boolean>(false);
+  const [canRedo, setCanRedo] = useState<boolean>(false);
 
   // Statistics
   const [stats, setStats] = useState<{ words: number; chars: number; readMinutes: number }>({
@@ -121,7 +144,18 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
 
         if (editorRef.current) {
           editorRef.current.innerHTML = markdownToHtml(noteData.content);
+          lastEditorHtmlRef.current = editorRef.current.innerHTML;
           updateStatsFromText(editorRef.current.innerText || '');
+
+          undoStackRef.current = [{
+            html: editorRef.current.innerHTML,
+            selection: null,
+            timestamp: Date.now(),
+          }];
+          redoStackRef.current = [];
+          lastSnapshotTimeRef.current = Date.now();
+          setCanUndo(false);
+          setCanRedo(false);
         }
         setLastSavedTime(new Date(noteData.updatedAt));
       }
@@ -136,6 +170,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
         if (!isDirtyRef.current && editorRef.current) {
           contentRef.current = data.content;
           editorRef.current.innerHTML = markdownToHtml(data.content);
+          lastEditorHtmlRef.current = editorRef.current.innerHTML;
           updateStatsFromText(editorRef.current.innerText || '');
           setActiveTags(extractTags(data.content));
         }
@@ -164,9 +199,10 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
       saveTimeoutRef.current = null;
     }
 
-    if (!isDirtyRef.current || !editorRef.current) return;
+    const htmlToSave = editorRef.current?.innerHTML || lastEditorHtmlRef.current;
+    if (!isDirtyRef.current || !htmlToSave) return;
 
-    const rawMd = htmlToMarkdown(editorRef.current.innerHTML, activeTags);
+    const rawMd = htmlToMarkdown(htmlToSave, activeTags);
     contentRef.current = rawMd;
     setIsSaving(true);
 
@@ -192,12 +228,219 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     }, 750);
   }, [flushSave]);
 
-  const handleContentMutated = useCallback(() => {
+  // Caret and selection path restoration helpers
+  const getNodePath = (root: Node, target: Node): number[] => {
+    const path: number[] = [];
+    let current: Node | null = target;
+    while (current && current !== root) {
+      const parent: Node | null = current.parentNode;
+      if (!parent) break;
+      const index = Array.from(parent.childNodes).indexOf(current as ChildNode);
+      if (index === -1) break;
+      path.unshift(index);
+      current = parent;
+    }
+    return path;
+  };
+
+  const resolveNodePath = (root: Node, path: number[]): Node | null => {
+    let current: Node = root;
+    for (const index of path) {
+      if (!current.childNodes || index >= current.childNodes.length) {
+        return null;
+      }
+      current = current.childNodes[index];
+    }
+    return current;
+  };
+
+  const captureSelection = (): HistorySnapshot['selection'] => {
+    if (!editorRef.current) return null;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!editorRef.current.contains(range.startContainer) || !editorRef.current.contains(range.endContainer)) {
+      return null;
+    }
+    return {
+      startPath: getNodePath(editorRef.current, range.startContainer),
+      startOffset: range.startOffset,
+      endPath: getNodePath(editorRef.current, range.endContainer),
+      endOffset: range.endOffset,
+    };
+  };
+
+  const restoreSelection = (selData: HistorySnapshot['selection']) => {
+    if (!editorRef.current || !selData) return;
+    const startNode = resolveNodePath(editorRef.current, selData.startPath);
+    const endNode = resolveNodePath(editorRef.current, selData.endPath);
+    if (!startNode || !endNode) return;
+
+    try {
+      const range = document.createRange();
+      const maxStartOffset = startNode.nodeType === Node.TEXT_NODE
+        ? (startNode.textContent?.length || 0)
+        : startNode.childNodes.length;
+      const maxEndOffset = endNode.nodeType === Node.TEXT_NODE
+        ? (endNode.textContent?.length || 0)
+        : endNode.childNodes.length;
+
+      range.setStart(startNode, Math.min(selData.startOffset, maxStartOffset));
+      range.setEnd(endNode, Math.min(selData.endOffset, maxEndOffset));
+
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      lastRangeRef.current = range.cloneRange();
+    } catch {}
+  };
+
+  // Push history snapshot with 650ms debounce for typing, or immediate on structural changes
+  const pushHistorySnapshot = (force = false) => {
+    if (!editorRef.current || isApplyingHistoryRef.current) return;
+
+    const currentHtml = editorRef.current.innerHTML;
+    const now = Date.now();
+    const currentSelection = captureSelection();
+
+    if (undoStackRef.current.length === 0) {
+      undoStackRef.current.push({
+        html: currentHtml,
+        selection: currentSelection,
+        timestamp: now,
+      });
+      lastSnapshotTimeRef.current = now;
+      setCanUndo(false);
+      return;
+    }
+
+    const lastSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
+
+    if (lastSnapshot.html === currentHtml) {
+      lastSnapshot.selection = currentSelection;
+      return;
+    }
+
+    const timeSinceLast = now - lastSnapshotTimeRef.current;
+    const sessionDuration = now - lastSnapshot.timestamp;
+
+    if (force || timeSinceLast > 650 || sessionDuration > 2000) {
+      undoStackRef.current.push({
+        html: currentHtml,
+        selection: currentSelection,
+        timestamp: now,
+      });
+
+      if (undoStackRef.current.length > MAX_HISTORY_LENGTH) {
+        undoStackRef.current.shift();
+      }
+
+      redoStackRef.current = [];
+      lastSnapshotTimeRef.current = now;
+      setCanUndo(undoStackRef.current.length > 1);
+      setCanRedo(false);
+    } else {
+      lastSnapshot.html = currentHtml;
+      lastSnapshot.selection = currentSelection;
+      lastSnapshotTimeRef.current = now;
+    }
+  };
+
+  const handleContentMutated = (skipHistory = false, forceHistory = false) => {
     if (editorRef.current) {
+      lastEditorHtmlRef.current = editorRef.current.innerHTML;
+      if (!skipHistory && !isApplyingHistoryRef.current) {
+        pushHistorySnapshot(forceHistory);
+      }
       updateStatsFromText(editorRef.current.innerText || '');
     }
     scheduleSave();
-  }, [scheduleSave, updateStatsFromText]);
+  };
+
+  const handleUndo = useCallback(() => {
+    if (!editorRef.current || undoStackRef.current.length <= 1) return;
+
+    const currentHtml = editorRef.current.innerHTML;
+    const currentSelection = captureSelection();
+    const currentTop = undoStackRef.current[undoStackRef.current.length - 1];
+
+    if (currentTop && currentTop.html !== currentHtml) {
+      currentTop.html = currentHtml;
+      currentTop.selection = currentSelection;
+    }
+
+    const popped = undoStackRef.current.pop();
+    if (popped) {
+      redoStackRef.current.push(popped);
+    }
+
+    const targetSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
+    if (targetSnapshot) {
+      isApplyingHistoryRef.current = true;
+      editorRef.current.innerHTML = targetSnapshot.html;
+      lastEditorHtmlRef.current = targetSnapshot.html;
+      editorRef.current.focus();
+      restoreSelection(targetSnapshot.selection);
+      handleContentMutated(true);
+      isApplyingHistoryRef.current = false;
+    }
+
+    setCanUndo(undoStackRef.current.length > 1);
+    setCanRedo(redoStackRef.current.length > 0);
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    if (!editorRef.current || redoStackRef.current.length === 0) return;
+
+    const popped = redoStackRef.current.pop();
+    if (!popped) return;
+
+    undoStackRef.current.push(popped);
+
+    isApplyingHistoryRef.current = true;
+    editorRef.current.innerHTML = popped.html;
+    lastEditorHtmlRef.current = popped.html;
+    editorRef.current.focus();
+    restoreSelection(popped.selection);
+    handleContentMutated(true);
+    isApplyingHistoryRef.current = false;
+
+    setCanUndo(undoStackRef.current.length > 1);
+    setCanRedo(redoStackRef.current.length > 0);
+  }, []);
+
+  // Global Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y shortcuts for detached note
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // If event happened inside editor, handleEditorKeyDown handles it
+      if (editorRef.current && editorRef.current.contains(e.target as Node)) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+        const tag = (document.activeElement?.tagName || '').toUpperCase();
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          e.preventDefault();
+          handleUndo();
+        }
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z')) ||
+        ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y'))
+      ) {
+        const tag = (document.activeElement?.tagName || '').toUpperCase();
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [handleUndo, handleRedo]);
 
   // Auto-save on window blur or beforeunload
   useEffect(() => {
@@ -211,13 +454,81 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     };
   }, [flushSave]);
 
-  // Selection saver
-  const saveCurrentSelection = () => {
+  const activeHeadingRef = useRef<HTMLElement | null>(null);
+
+  // Update visual # indicators on the active heading where caret is located
+  const updateActiveHeading = useCallback(() => {
+    if (!editorRef.current) return;
     const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      lastRangeRef.current = sel.getRangeAt(0).cloneRange();
+    let headingEl: HTMLElement | null = null;
+
+    if (sel && sel.anchorNode) {
+      const node = sel.anchorNode;
+      const parentEl = node.nodeType === Node.ELEMENT_NODE
+        ? (node as HTMLElement)
+        : node.parentElement;
+
+      const closestH = parentEl?.closest('h1, h2, h3, h4, h5, h6') as HTMLElement | null;
+      if (closestH && editorRef.current.contains(closestH)) {
+        headingEl = closestH;
+      }
     }
-  };
+
+    if (activeHeadingRef.current !== headingEl) {
+      if (activeHeadingRef.current && activeHeadingRef.current.isConnected) {
+        activeHeadingRef.current.classList.remove('albaqros-active-heading');
+      }
+      editorRef.current.querySelectorAll('.albaqros-active-heading').forEach((el) => {
+        if (el !== headingEl) el.classList.remove('albaqros-active-heading');
+      });
+      if (headingEl) {
+        headingEl.classList.add('albaqros-active-heading');
+      }
+      activeHeadingRef.current = headingEl;
+    }
+  }, []);
+
+  const clearActiveHeading = useCallback(() => {
+    if (activeHeadingRef.current && activeHeadingRef.current.isConnected) {
+      activeHeadingRef.current.classList.remove('albaqros-active-heading');
+    }
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll('.albaqros-active-heading').forEach((el) => {
+        el.classList.remove('albaqros-active-heading');
+      });
+    }
+    activeHeadingRef.current = null;
+  }, []);
+
+  // Selection saver
+  const saveCurrentSelection = useCallback(() => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editorRef.current) {
+      const range = sel.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        lastRangeRef.current = range.cloneRange();
+      }
+    }
+    updateActiveHeading();
+  }, [updateActiveHeading]);
+
+  // Continuously track caret and selection inside the editor across all user clicks/keys
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editorRef.current) {
+        const range = sel.getRangeAt(0);
+        if (editorRef.current.contains(range.commonAncestorContainer)) {
+          lastRangeRef.current = range.cloneRange();
+        }
+      }
+      updateActiveHeading();
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [updateActiveHeading]);
 
   // Dock note back into main window
   const handleDockBack = async () => {
@@ -293,7 +604,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     lastRangeRef.current = newRange.cloneRange();
 
     setWikiPopup({ open: false, query: '', top: 0, left: 0, selectedIndex: 0 });
-    handleContentMutated();
+    handleContentMutated(false, true);
     editorRef.current?.focus();
   };
 
@@ -406,7 +717,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     }
 
     setIsWebLinkModalOpen(false);
-    handleContentMutated();
+    handleContentMutated(false, true);
     editorRef.current?.focus();
   };
 
@@ -423,145 +734,381 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     return Math.max(1, depth);
   };
 
-  const indentListItem = (currentLi: HTMLElement, sel: Selection) => {
-    const prevLi = currentLi.previousElementSibling as HTMLElement | null;
-    if (!prevLi || prevLi.tagName.toUpperCase() !== 'LI') return;
+  // Helper to get all top-level selected <li> elements across the current selection range
+  const getSelectedListItems = (sel: Selection | null): HTMLElement[] => {
+    if (!sel || !sel.rangeCount || !editorRef.current) return [];
+    const range = sel.getRangeAt(0);
 
-    const parentList = currentLi.closest('ul, ol') as HTMLElement | null;
-    const isOl = parentList?.tagName.toUpperCase() === 'OL';
+    if (range.collapsed) {
+      const singleLi = getActiveListItem(sel);
+      return singleLi && editorRef.current.contains(singleLi) ? [singleLi] : [];
+    }
 
-    let subList = prevLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
-    if (!subList) {
-      subList = document.createElement(isOl ? 'ol' : 'ul');
-      subList.style.margin = isOl ? '4px 0 4px 20px' : '4px 0 4px 18px';
-      subList.style.padding = '0';
-      subList.style.fontSize = '0.92rem';
-      subList.style.color = '#f8fafc';
-      subList.style.lineHeight = '1.6';
-      if (!isOl) {
-        const depth = getListNestingDepth(prevLi);
-        subList.style.listStyleType = depth === 1 ? 'circle' : depth >= 2 ? 'square' : 'circle';
-      } else {
-        const depth = getListNestingDepth(prevLi);
-        subList.style.listStyleType = depth === 1 ? 'lower-alpha' : 'lower-roman';
+    const allLis = Array.from(editorRef.current.querySelectorAll('li')) as HTMLElement[];
+    const selected: HTMLElement[] = [];
+
+    for (const li of allLis) {
+      if (!editorRef.current.contains(li)) continue;
+
+      const startInLi = li.contains(range.startContainer);
+      const endInLi = li.contains(range.endContainer);
+
+      if (startInLi) {
+        const closestLi = (
+          range.startContainer.nodeType === Node.ELEMENT_NODE
+            ? (range.startContainer as HTMLElement).closest('li')
+            : range.startContainer.parentElement?.closest('li')
+        );
+        if (closestLi === li) {
+          selected.push(li);
+          continue;
+        }
       }
-      prevLi.appendChild(subList);
-    }
 
-    const startNode = sel.anchorNode;
-    const startOffset = sel.anchorOffset;
+      if (endInLi) {
+        const closestLi = (
+          range.endContainer.nodeType === Node.ELEMENT_NODE
+            ? (range.endContainer as HTMLElement).closest('li')
+            : range.endContainer.parentElement?.closest('li')
+        );
+        if (closestLi === li) {
+          selected.push(li);
+          continue;
+        }
+      }
 
-    subList.appendChild(currentLi);
-
-    if (!currentLi.childNodes.length || currentLi.innerHTML.trim() === '') {
-      currentLi.innerHTML = '<br>';
-    }
-
-    let cursorSet = false;
-    if (startNode && currentLi.contains(startNode)) {
       try {
-        const range = document.createRange();
-        range.setStart(startNode, startOffset);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        lastRangeRef.current = range.cloneRange();
-        cursorSet = true;
+        if (range.comparePoint(li, 0) <= 0 && range.comparePoint(li, li.childNodes.length) >= 0) {
+          const containsStart = li.contains(range.startContainer);
+          const containsEnd = li.contains(range.endContainer);
+          if (!containsStart && !containsEnd) {
+            selected.push(li);
+          }
+        }
       } catch {
-        cursorSet = false;
+        // Fallback for detached or cross-tree comparisons
       }
     }
 
-    if (!cursorSet) {
+    return selected.filter((li) => !selected.some((other) => other !== li && other.contains(li)));
+  };
+
+  // Helper to get top-level block elements intersecting the range when outside lists
+  const getSelectedBlocks = (sel: Selection | null): HTMLElement[] => {
+    if (!sel || !sel.rangeCount || !editorRef.current) return [];
+    const range = sel.getRangeAt(0);
+    const children = Array.from(editorRef.current.children) as HTMLElement[];
+    const selected: HTMLElement[] = [];
+
+    for (const child of children) {
+      if (child.tagName === 'UL' || child.tagName === 'OL') continue;
+      try {
+        if (range.intersectsNode(child)) {
+          selected.push(child);
+        }
+      } catch {}
+    }
+    return selected;
+  };
+
+  // Indent one or multiple list items: creates a nested sub-bullet list under the upper topic (previous sibling LI)
+  const indentListItems = (items: HTMLElement[], sel: Selection) => {
+    if (items.length === 0) return;
+    pushHistorySnapshot(true);
+
+    for (const li of items) {
+      const prevLi = li.previousElementSibling as HTMLElement | null;
+      if (!prevLi || prevLi.tagName.toUpperCase() !== 'LI') {
+        continue;
+      }
+
+      let subList = prevLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
+      if (!subList) {
+        subList = document.createElement('ul');
+        subList.style.margin = '4px 0 4px 18px';
+        subList.style.padding = '0';
+        subList.style.fontSize = '0.92rem';
+        subList.style.color = '#f8fafc';
+        subList.style.lineHeight = '1.6';
+        const depth = getListNestingDepth(prevLi);
+        subList.style.listStyleType = depth === 1 ? 'circle' : depth >= 2 ? 'square' : 'disc';
+        prevLi.appendChild(subList);
+      }
+
+      subList.appendChild(li);
+
+      if (!li.childNodes.length || li.innerHTML.trim() === '') {
+        li.innerHTML = '<br>';
+      }
+    }
+
+    if (sel.isCollapsed && items.length === 1) {
+      const singleLi = items[0];
       const range = document.createRange();
-      const subListEl = currentLi.querySelector(':scope > ul, :scope > ol');
+      const subListEl = singleLi.querySelector(':scope > ul, :scope > ol');
       if (subListEl) {
         range.setStartBefore(subListEl);
       } else {
-        range.selectNodeContents(currentLi);
+        range.selectNodeContents(singleLi);
       }
       range.collapse(false);
       sel.removeAllRanges();
       sel.addRange(range);
       lastRangeRef.current = range.cloneRange();
-    }
-
-    handleContentMutated();
-  };
-
-  const outdentListItem = (currentLi: HTMLElement, sel: Selection) => {
-    const parentSubList = currentLi.closest('ul, ol') as HTMLElement | null;
-    if (!parentSubList) return;
-
-    const parentLi = parentSubList.parentElement?.closest('li') as HTMLElement | null;
-
-    if (parentLi && parentLi.parentElement) {
-      const startNode = sel.anchorNode;
-      const startOffset = sel.anchorOffset;
-
-      const followingLis: Element[] = [];
-      let nextSib = currentLi.nextElementSibling;
-      while (nextSib) {
-        followingLis.push(nextSib);
-        nextSib = nextSib.nextElementSibling;
-      }
-
-      parentLi.parentElement.insertBefore(currentLi, parentLi.nextSibling);
-
-      if (followingLis.length > 0) {
-        const isOl = parentSubList.tagName.toUpperCase() === 'OL';
-        let newSubList = currentLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
-        if (!newSubList) {
-          newSubList = document.createElement(isOl ? 'ol' : 'ul');
-          newSubList.style.margin = isOl ? '4px 0 4px 20px' : '4px 0 4px 18px';
-          newSubList.style.padding = '0';
-          newSubList.style.fontSize = '0.92rem';
-          newSubList.style.color = '#f8fafc';
-          newSubList.style.lineHeight = '1.6';
-          currentLi.appendChild(newSubList);
-        }
-        followingLis.forEach((sib) => newSubList!.appendChild(sib));
-      }
-
-      if (parentSubList.children.length === 0) {
-        parentSubList.remove();
-      }
-
-      let cursorSet = false;
-      if (startNode && currentLi.contains(startNode)) {
-        try {
-          const range = document.createRange();
-          range.setStart(startNode, startOffset);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-          lastRangeRef.current = range.cloneRange();
-          cursorSet = true;
-        } catch {
-          cursorSet = false;
-        }
-      }
-
-      if (!cursorSet) {
+    } else if (items.length > 0) {
+      try {
         const range = document.createRange();
-        const subListEl = currentLi.querySelector(':scope > ul, :scope > ol');
-        if (subListEl) {
-          range.setStartBefore(subListEl);
-        } else {
-          range.selectNodeContents(currentLi);
-        }
-        range.collapse(false);
+        range.setStart(items[0], 0);
+        const lastItem = items[items.length - 1];
+        range.setEnd(lastItem, lastItem.childNodes.length);
         sel.removeAllRanges();
         sel.addRange(range);
         lastRangeRef.current = range.cloneRange();
-      }
+      } catch {}
+    }
 
-      handleContentMutated();
-    } else {
-      if (isListItemEmpty(currentLi)) {
-        exitListToNormalParagraph(currentLi, sel);
+    handleContentMutated(false, true);
+  };
+
+  const indentListItem = (currentLi: HTMLElement, sel: Selection) => {
+    indentListItems([currentLi], sel);
+  };
+
+  // Convert a list item into a regular paragraph (removing bullet or number), preserving content, following list continuation, and cursor position
+  const convertListItemToParagraph = (currentLi: HTMLElement, sel: Selection) => {
+    outdentListItems([currentLi], sel);
+  };
+
+  // Outdent one or multiple list items: moves up towards parent list, or converts to paragraphs if already at root
+  const outdentListItems = (items: HTMLElement[], sel: Selection) => {
+    if (items.length === 0) return;
+    pushHistorySnapshot(true);
+
+    const resultingElements: HTMLElement[] = [];
+    const lastInsertedMap = new Map<HTMLElement, HTMLElement>();
+
+    for (const li of items) {
+      const parentSubList = li.closest('ul, ol') as HTMLElement | null;
+      if (!parentSubList) continue;
+
+      const parentLi = parentSubList.parentElement?.closest('li') as HTMLElement | null;
+
+      if (parentLi && parentLi.parentElement) {
+        const upperList = parentLi.parentElement;
+        const prevInsert = lastInsertedMap.get(parentLi) || parentLi;
+        upperList.insertBefore(li, prevInsert.nextSibling);
+        lastInsertedMap.set(parentLi, li);
+        resultingElements.push(li);
+
+        if (items.length === 1) {
+          const followingLis: Element[] = [];
+          let nextSib = li.nextElementSibling;
+          while (nextSib) {
+            followingLis.push(nextSib);
+            nextSib = nextSib.nextElementSibling;
+          }
+          if (followingLis.length > 0) {
+            const isOl = parentSubList.tagName.toUpperCase() === 'OL';
+            let newSubList = li.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
+            if (!newSubList) {
+              newSubList = document.createElement(isOl ? 'ol' : 'ul');
+              const isUpperOl = parentLi.parentElement?.tagName.toUpperCase() === 'OL';
+              newSubList.style.margin = (isUpperOl && !isOl) ? '3px 0 3px 0' : (isOl ? '4px 0 4px 20px' : '4px 0 4px 18px');
+              newSubList.style.padding = '0';
+              newSubList.style.fontSize = '0.92rem';
+              newSubList.style.color = '#f8fafc';
+              newSubList.style.lineHeight = '1.6';
+              li.appendChild(newSubList);
+            }
+            followingLis.forEach((sib) => newSubList!.appendChild(sib));
+          }
+        }
+
+        if (parentSubList.children.length === 0) {
+          parentSubList.remove();
+        }
+      } else {
+        // Root list level: convert to normal paragraph
+        const isOl = parentSubList.tagName.toUpperCase() === 'OL';
+        let olIndex = 1;
+        if (isOl) {
+          const startAttr = parentSubList.getAttribute('start');
+          const baseStart = startAttr ? parseInt(startAttr, 10) || 1 : 1;
+          let count = 0;
+          for (let j = 0; j < parentSubList.children.length; j++) {
+            if (parentSubList.children[j] === li) {
+              olIndex = baseStart + count + 1;
+              break;
+            }
+            if (parentSubList.children[j].tagName.toUpperCase() === 'LI') count++;
+          }
+        }
+
+        const nestedLists = Array.from(li.querySelectorAll(':scope > ul, :scope > ol')) as HTMLElement[];
+        nestedLists.forEach((nl) => nl.remove());
+
+        const normalP = document.createElement('p');
+        normalP.style.margin = '6px 0';
+        normalP.style.fontSize = '0.94rem';
+        normalP.style.lineHeight = '1.65';
+        normalP.style.color = '#f8fafc';
+        normalP.innerHTML = li.innerHTML.trim() || '<br>';
+
+        const followingLis: HTMLElement[] = [];
+        let nextSib = li.nextElementSibling;
+        while (nextSib) {
+          if (nextSib.tagName.toUpperCase() === 'LI' && !items.includes(nextSib as HTMLElement)) {
+            followingLis.push(nextSib as HTMLElement);
+          }
+          nextSib = nextSib.nextElementSibling;
+        }
+
+        li.remove();
+
+        let secondList: HTMLElement | null = null;
+        if (followingLis.length > 0) {
+          secondList = document.createElement(parentSubList.tagName.toLowerCase()) as HTMLElement;
+          secondList.style.margin = isOl ? '6px 0 6px 24px' : '6px 0 6px 20px';
+          secondList.style.padding = '0';
+          secondList.style.fontSize = '0.92rem';
+          secondList.style.color = '#f8fafc';
+          secondList.style.lineHeight = '1.6';
+          if (isOl) {
+            secondList.style.listStyleType = 'decimal';
+            secondList.setAttribute('start', String(olIndex));
+          }
+          followingLis.forEach((sib) => secondList!.appendChild(sib));
+        }
+
+        if (parentSubList.children.length > 0) {
+          parentSubList.insertAdjacentElement('afterend', normalP);
+          let lastInsert: HTMLElement = normalP;
+          nestedLists.forEach((nl) => {
+            lastInsert.insertAdjacentElement('afterend', nl);
+            lastInsert = nl;
+          });
+          if (secondList) {
+            lastInsert.insertAdjacentElement('afterend', secondList);
+          }
+        } else {
+          parentSubList.replaceWith(normalP);
+          let lastInsert: HTMLElement = normalP;
+          nestedLists.forEach((nl) => {
+            lastInsert.insertAdjacentElement('afterend', nl);
+            lastInsert = nl;
+          });
+          if (secondList) {
+            lastInsert.insertAdjacentElement('afterend', secondList);
+          }
+        }
+
+        resultingElements.push(normalP);
       }
     }
+
+    if (editorRef.current) {
+      cleanAllEmptyListItems(editorRef.current);
+    }
+
+    if (sel.isCollapsed && resultingElements.length === 1) {
+      const singleEl = resultingElements[0];
+      const range = document.createRange();
+      range.selectNodeContents(singleEl);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      lastRangeRef.current = range.cloneRange();
+    } else if (resultingElements.length > 0) {
+      try {
+        const range = document.createRange();
+        range.setStart(resultingElements[0], 0);
+        const lastEl = resultingElements[resultingElements.length - 1];
+        range.setEnd(lastEl, lastEl.childNodes.length);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        lastRangeRef.current = range.cloneRange();
+      } catch {}
+    }
+
+    editorRef.current?.focus();
+    handleContentMutated(false, true);
+  };
+
+  const outdentListItem = (currentLi: HTMLElement, sel: Selection) => {
+    outdentListItems([currentLi], sel);
+  };
+
+  // Indent non-list block elements
+  const indentBlocks = (blocks: HTMLElement[], sel: Selection) => {
+    if (blocks.length === 0) return;
+    pushHistorySnapshot(true);
+
+    for (const block of blocks) {
+      if (block.tagName === 'PRE') {
+        const code = block.querySelector('code') || block;
+        code.textContent = (code.textContent || '')
+          .split('\n')
+          .map((line) => '  ' + line)
+          .join('\n');
+      } else {
+        const firstChild = block.firstChild;
+        if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
+          firstChild.textContent = '\u00a0\u00a0' + (firstChild.textContent || '');
+        } else {
+          block.insertBefore(document.createTextNode('\u00a0\u00a0'), block.firstChild);
+        }
+      }
+    }
+
+    try {
+      const range = document.createRange();
+      range.setStart(blocks[0], 0);
+      const lastBlock = blocks[blocks.length - 1];
+      range.setEnd(lastBlock, lastBlock.childNodes.length);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      lastRangeRef.current = range.cloneRange();
+    } catch {}
+
+    handleContentMutated(false, true);
+  };
+
+  // Outdent non-list block elements
+  const outdentBlocks = (blocks: HTMLElement[], sel: Selection) => {
+    if (blocks.length === 0) return;
+    pushHistorySnapshot(true);
+
+    for (const block of blocks) {
+      if (block.tagName === 'PRE') {
+        const code = block.querySelector('code') || block;
+        code.textContent = (code.textContent || '')
+          .split('\n')
+          .map((line) => line.replace(/^ {1,2}/, ''))
+          .join('\n');
+      } else {
+        const firstChild = block.firstChild;
+        if (firstChild && firstChild.nodeType === Node.TEXT_NODE) {
+          const text = firstChild.textContent || '';
+          if (text.startsWith('\u00a0\u00a0') || text.startsWith('  ')) {
+            firstChild.textContent = text.slice(2);
+          } else if (text.startsWith('\u00a0') || text.startsWith(' ')) {
+            firstChild.textContent = text.slice(1);
+          }
+        }
+      }
+    }
+
+    try {
+      const range = document.createRange();
+      range.setStart(blocks[0], 0);
+      const lastBlock = blocks[blocks.length - 1];
+      range.setEnd(lastBlock, lastBlock.childNodes.length);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      lastRangeRef.current = range.cloneRange();
+    } catch {}
+
+    handleContentMutated(false, true);
   };
 
   const exitListToNormalParagraph = (currentLi: HTMLElement, sel: Selection) => {
@@ -629,13 +1176,411 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
-    lastRangeRef.current = range.cloneRange();
-
+    editorRef.current?.focus();
     handleContentMutated();
+  };
+
+  // Helper to reliably find the active <li> from current selection, handling cases where anchorNode is <ul> or <ol>
+  const getActiveListItem = (sel: Selection | null): HTMLElement | null => {
+    if (!sel || !sel.anchorNode) return null;
+
+    let node: Node | null = sel.anchorNode;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      const li = el.closest('li');
+      if (li && editorRef.current?.contains(li)) return li;
+
+      // When caret is inside UL/OL, anchorNode is often the UL/OL element itself with anchorOffset pointing to the LI child
+      if (el.tagName === 'UL' || el.tagName === 'OL') {
+        const child = el.childNodes[sel.anchorOffset] || el.childNodes[Math.max(0, sel.anchorOffset - 1)];
+        if (child) {
+          if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === 'LI') {
+            return child as HTMLElement;
+          }
+          if (child.nodeType === Node.ELEMENT_NODE) {
+            const liChild = (child as HTMLElement).closest('li');
+            if (liChild && editorRef.current?.contains(liChild)) return liChild;
+          }
+        }
+      }
+    } else if (node.parentElement) {
+      const li = node.parentElement.closest('li');
+      if (li && editorRef.current?.contains(li)) return li;
+    }
+
+    if (sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const startNode = range.startContainer;
+      if (startNode.nodeType === Node.ELEMENT_NODE) {
+        const el = startNode as HTMLElement;
+        const li = el.closest('li');
+        if (li && editorRef.current?.contains(li)) return li;
+
+        if (el.tagName === 'UL' || el.tagName === 'OL') {
+          const child = el.childNodes[range.startOffset] || el.childNodes[Math.max(0, range.startOffset - 1)];
+          if (child && child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === 'LI') {
+            return child as HTMLElement;
+          }
+          if (child && child.nodeType === Node.ELEMENT_NODE) {
+            const liChild = (child as HTMLElement).closest('li');
+            if (liChild && editorRef.current?.contains(liChild)) return liChild;
+          }
+        }
+      } else if (startNode.parentElement) {
+        const li = startNode.parentElement.closest('li');
+        if (li && editorRef.current?.contains(li)) return li;
+      }
+    }
+
+    return null;
+  };
+
+  // Convert or toggle list format between bulleted (ul) and numbered (ol), with smart nesting support
+  const toggleListFormat = (targetType: 'ul' | 'ol', initialStartVal?: number) => {
+    pushHistorySnapshot(true);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) {
+      document.execCommand(targetType === 'ol' ? 'insertOrderedList' : 'insertUnorderedList');
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    const selectedLis = getSelectedListItems(sel);
+    if (selectedLis.length > 1) {
+      const lists = Array.from(new Set(selectedLis.map((li) => li.closest('ul, ol') as HTMLElement).filter(Boolean)));
+      for (const list of lists) {
+        if (list.tagName.toLowerCase() !== targetType) {
+          const newList = document.createElement(targetType);
+          newList.style.margin = targetType === 'ol' ? '6px 0 6px 24px' : '6px 0 6px 20px';
+          newList.style.padding = '0';
+          newList.style.fontSize = '0.92rem';
+          newList.style.color = '#f8fafc';
+          newList.style.lineHeight = '1.6';
+          if (targetType === 'ol') {
+            newList.style.listStyleType = 'decimal';
+          } else {
+            newList.style.listStyleType = 'disc';
+          }
+          while (list.firstChild) {
+            newList.appendChild(list.firstChild);
+          }
+          Array.from(newList.querySelectorAll('li')).forEach((li) => {
+            const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+            const firstText = walker.nextNode();
+            if (firstText && firstText.nodeValue) {
+              if (targetType === 'ul') {
+                firstText.nodeValue = firstText.nodeValue.replace(/^\d+[.)]\s*/, '').replace(/^[-*•]\s*/, '');
+              } else {
+                firstText.nodeValue = firstText.nodeValue.replace(/^[-*•]\s*/, '').replace(/^\d+[.)]\s*/, '');
+              }
+            }
+          });
+          list.replaceWith(newList);
+        }
+      }
+      try {
+        const range = document.createRange();
+        range.setStart(selectedLis[0], 0);
+        const last = selectedLis[selectedLis.length - 1];
+        range.setEnd(last, last.childNodes.length);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        lastRangeRef.current = range.cloneRange();
+      } catch {}
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    const currentLi = getActiveListItem(sel);
+    if (!currentLi || !editorRef.current?.contains(currentLi)) {
+      if (targetType === 'ol' && initialStartVal && initialStartVal > 0) {
+        const startNode = sel.anchorNode;
+        const currentBlock = (
+          startNode?.nodeType === Node.ELEMENT_NODE
+            ? (startNode as HTMLElement).closest('p, div, h1, h2, h3, h4, h5, h6')
+            : startNode?.parentElement?.closest('p, div, h1, h2, h3, h4, h5, h6')
+        ) as HTMLElement | null;
+
+        if (currentBlock && editorRef.current?.contains(currentBlock)) {
+          const ol = document.createElement('ol');
+          ol.style.margin = '6px 0 6px 24px';
+          ol.style.padding = '0';
+          ol.style.fontSize = '0.92rem';
+          ol.style.color = '#f8fafc';
+          ol.style.lineHeight = '1.6';
+          ol.style.listStyleType = 'decimal';
+          ol.setAttribute('start', String(initialStartVal));
+
+          const li = document.createElement('li');
+          li.style.margin = '3px 0';
+          li.innerHTML = currentBlock.innerHTML.trim() || '<br>';
+          ol.appendChild(li);
+
+          currentBlock.replaceWith(ol);
+
+          const range = document.createRange();
+          range.selectNodeContents(li);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          lastRangeRef.current = range.cloneRange();
+
+          handleContentMutated();
+          editorRef.current?.focus();
+          return;
+        }
+      }
+
+      document.execCommand(targetType === 'ol' ? 'insertOrderedList' : 'insertUnorderedList');
+      if (targetType === 'ol' && initialStartVal && initialStartVal > 1) {
+        const curSel = window.getSelection();
+        const ol = (curSel?.anchorNode?.nodeType === Node.ELEMENT_NODE
+          ? (curSel?.anchorNode as HTMLElement).closest('ol')
+          : curSel?.anchorNode?.parentElement?.closest('ol'));
+        if (ol) ol.setAttribute('start', String(initialStartVal));
+      }
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    const parentList = currentLi.closest('ul, ol') as HTMLElement | null;
+    if (!parentList) {
+      document.execCommand(targetType === 'ol' ? 'insertOrderedList' : 'insertUnorderedList');
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    const currentTag = parentList.tagName.toLowerCase();
+    const isSublist = parentList.parentElement?.tagName.toUpperCase() === 'LI';
+
+    // If already the target type at root level
+    if (currentTag === targetType && !isSublist) {
+      if (targetType === 'ol') {
+        // If initialStartVal was provided (e.g. from typing "10." + Space), set the start value!
+        if (initialStartVal && initialStartVal > 0) {
+          const isFirstLi = !currentLi.previousElementSibling || currentLi.previousElementSibling.tagName.toUpperCase() !== 'LI';
+          if (isFirstLi) {
+            parentList.setAttribute('start', String(initialStartVal));
+          } else {
+            // Split OL
+            const followingLis: HTMLElement[] = [currentLi];
+            let nextSib = currentLi.nextElementSibling;
+            while (nextSib) {
+              if (nextSib.tagName.toUpperCase() === 'LI') followingLis.push(nextSib as HTMLElement);
+              nextSib = nextSib.nextElementSibling;
+            }
+            const newOl = document.createElement('ol');
+            newOl.style.margin = parentList.style.margin || '6px 0 6px 24px';
+            newOl.style.padding = '0';
+            newOl.style.fontSize = parentList.style.fontSize || '0.92rem';
+            newOl.style.color = parentList.style.color || '#f8fafc';
+            newOl.style.lineHeight = parentList.style.lineHeight || '1.6';
+            newOl.style.listStyleType = 'decimal';
+            newOl.setAttribute('start', String(initialStartVal));
+            followingLis.forEach((li) => newOl.appendChild(li));
+            parentList.insertAdjacentElement('afterend', newOl);
+          }
+          handleContentMutated();
+          editorRef.current?.focus();
+          return;
+        }
+
+        // Toolbar button clicked on an existing OL without initialStartVal:
+        // Ask the user what number to start at, or empty to turn off!
+        const curStart = parentList.getAttribute('start') || '1';
+        const userVal = window.prompt('Número inicial da lista (ou deixe em branco para desativar lista):', curStart);
+        if (userVal === null) {
+          editorRef.current?.focus();
+          return;
+        }
+        const parsed = parseInt(userVal.trim(), 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          parentList.setAttribute('start', String(parsed));
+          handleContentMutated();
+          editorRef.current?.focus();
+          return;
+        }
+      }
+
+      document.execCommand(targetType === 'ol' ? 'insertOrderedList' : 'insertUnorderedList');
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    // Inside a nested sublist: switch sublist tag between ul and ol
+    if (isSublist) {
+      if (currentTag === targetType && targetType === 'ol') {
+        if (initialStartVal && initialStartVal > 0) {
+          parentList.setAttribute('start', String(initialStartVal));
+          handleContentMutated();
+          editorRef.current?.focus();
+          return;
+        }
+        const curStart = parentList.getAttribute('start') || '1';
+        const userVal = window.prompt('Número inicial da sub-lista (ou deixe em branco para desativar lista):', curStart);
+        if (userVal === null) {
+          editorRef.current?.focus();
+          return;
+        }
+        const parsed = parseInt(userVal.trim(), 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          parentList.setAttribute('start', String(parsed));
+          handleContentMutated();
+          editorRef.current?.focus();
+          return;
+        }
+      }
+      const newList = document.createElement(targetType);
+      newList.style.margin = targetType === 'ol' ? '4px 0 4px 20px' : '4px 0 4px 18px';
+      newList.style.padding = '0';
+      newList.style.fontSize = '0.92rem';
+      newList.style.color = '#f8fafc';
+      newList.style.lineHeight = '1.6';
+      if (targetType === 'ul') {
+        newList.style.listStyleType = 'disc';
+      } else {
+        newList.style.listStyleType = 'lower-alpha';
+        if (initialStartVal && initialStartVal > 1) {
+          newList.setAttribute('start', String(initialStartVal));
+        }
+      }
+      while (parentList.firstChild) {
+        newList.appendChild(parentList.firstChild);
+      }
+      parentList.replaceWith(newList);
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    // In a root list: if changing list type and there is an upper topic (prevLi)
+    const prevLi = currentLi.previousElementSibling as HTMLElement | null;
+    if (prevLi && prevLi.tagName.toUpperCase() === 'LI') {
+      const isParentOl = parentList.tagName.toUpperCase() === 'OL';
+      let subList = prevLi.querySelector(':scope > ul, :scope > ol') as HTMLElement | null;
+      if (!subList) {
+        subList = document.createElement(targetType);
+        subList.style.margin = (isParentOl && targetType === 'ul')
+          ? '3px 0 3px 0'
+          : (targetType === 'ol' ? '4px 0 4px 20px' : '4px 0 4px 18px');
+        subList.style.padding = '0';
+        subList.style.fontSize = '0.92rem';
+        subList.style.color = '#f8fafc';
+        subList.style.lineHeight = '1.6';
+        if (targetType === 'ul') {
+          subList.style.listStyleType = 'disc';
+        } else {
+          subList.style.listStyleType = 'lower-alpha';
+          if (initialStartVal && initialStartVal > 1) {
+            subList.setAttribute('start', String(initialStartVal));
+          }
+        }
+        prevLi.appendChild(subList);
+      } else if (subList.tagName.toUpperCase() !== targetType.toUpperCase()) {
+        const newSub = document.createElement(targetType);
+        newSub.style.margin = (isParentOl && targetType === 'ul')
+          ? '3px 0 3px 0'
+          : (targetType === 'ol' ? '4px 0 4px 20px' : '4px 0 4px 18px');
+        newSub.style.padding = '0';
+        newSub.style.fontSize = '0.92rem';
+        newSub.style.color = '#f8fafc';
+        newSub.style.lineHeight = '1.6';
+        if (targetType === 'ul') {
+          newSub.style.listStyleType = 'disc';
+        } else {
+          newSub.style.listStyleType = 'lower-alpha';
+          if (initialStartVal && initialStartVal > 1) {
+            newSub.setAttribute('start', String(initialStartVal));
+          }
+        }
+        while (subList.firstChild) {
+          newSub.appendChild(subList.firstChild);
+        }
+        subList.replaceWith(newSub);
+        subList = newSub;
+      }
+
+      // Collect currentLi and all subsequent sibling LIs in this list
+      const lisToMove: HTMLElement[] = [currentLi];
+      let next = currentLi.nextElementSibling;
+      while (next) {
+        if (next.tagName.toUpperCase() === 'LI') {
+          lisToMove.push(next as HTMLElement);
+        }
+        next = next.nextElementSibling;
+      }
+
+      lisToMove.forEach((li) => subList!.appendChild(li));
+
+      // Restore caret inside currentLi
+      const range = document.createRange();
+      range.selectNodeContents(currentLi);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      lastRangeRef.current = range.cloneRange();
+
+      handleContentMutated();
+      editorRef.current?.focus();
+      return;
+    }
+
+    // First item of root list: convert the whole root list to targetType
+    const newList = document.createElement(targetType);
+    newList.style.margin = targetType === 'ol' ? '6px 0 6px 24px' : '6px 0 6px 20px';
+    newList.style.padding = '0';
+    newList.style.fontSize = '0.92rem';
+    newList.style.color = '#f8fafc';
+    newList.style.lineHeight = '1.6';
+    if (targetType === 'ol') {
+      newList.style.listStyleType = 'decimal';
+      if (initialStartVal && initialStartVal > 1) {
+        newList.setAttribute('start', String(initialStartVal));
+      }
+    }
+    while (parentList.firstChild) {
+      newList.appendChild(parentList.firstChild);
+    }
+    Array.from(newList.querySelectorAll('li')).forEach((li) => {
+      const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+      const firstText = walker.nextNode();
+      if (firstText && firstText.nodeValue) {
+        if (targetType === 'ul') {
+          firstText.nodeValue = firstText.nodeValue.replace(/^\d+[.)]\s*/, '').replace(/^[-*•]\s*/, '');
+        } else {
+          firstText.nodeValue = firstText.nodeValue.replace(/^[-*•]\s*/, '').replace(/^\d+[.)]\s*/, '');
+        }
+      }
+    });
+    parentList.replaceWith(newList);
+    handleContentMutated();
+    editorRef.current?.focus();
   };
 
   // Keyboard handler for rich writing and shortcuts
   const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Undo shortcut: Ctrl+Z or Cmd+Z (without Shift)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+      e.preventDefault();
+      handleUndo();
+      return;
+    }
+
+    // Redo shortcut: Ctrl+Shift+Z, Cmd+Shift+Z, Ctrl+Y, or Cmd+Y
+    if (
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z')) ||
+      ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y'))
+    ) {
+      e.preventDefault();
+      handleRedo();
+      return;
+    }
+
     // Dock back shortcut: Ctrl+Shift+D or Cmd+Shift+D
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
       e.preventDefault();
@@ -690,26 +1635,64 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
       }
     }
 
-    // Tab & Shift+Tab: Sub-bullet list indentation
+    // Tab & Shift+Tab: Sub-bullet list indentation or block indentation
     if (e.key === 'Tab') {
       const sel = window.getSelection();
-      if (sel && sel.anchorNode) {
-        const currentLi = (
-          sel.anchorNode.nodeType === Node.ELEMENT_NODE
-            ? (sel.anchorNode as HTMLElement).closest('li')
-            : sel.anchorNode.parentElement?.closest('li')
-        ) as HTMLElement | null;
+      if (sel && sel.rangeCount > 0) {
+        const selectedLis = getSelectedListItems(sel);
 
-        if (currentLi && editorRef.current?.contains(currentLi)) {
+        if (selectedLis.length > 0) {
           e.preventDefault();
           if (e.shiftKey) {
-            outdentListItem(currentLi, sel);
+            outdentListItems(selectedLis, sel);
           } else {
-            indentListItem(currentLi, sel);
+            indentListItems(selectedLis, sel);
           }
           return;
         }
 
+        // Multi-line selection outside of lists: indent/outdent all selected blocks
+        if (!sel.isCollapsed) {
+          const selectedBlocks = getSelectedBlocks(sel);
+          if (selectedBlocks.length > 0) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              outdentBlocks(selectedBlocks, sel);
+            } else {
+              indentBlocks(selectedBlocks, sel);
+            }
+            return;
+          }
+        }
+
+        // Single cursor outside list:
+        if (e.shiftKey) {
+          e.preventDefault();
+          const range = sel.getRangeAt(0);
+          const node = range.startContainer;
+          if (node && node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent || '';
+            const offset = range.startOffset;
+            if (offset >= 2 && text.slice(offset - 2, offset) === '  ') {
+              node.textContent = text.slice(0, offset - 2) + text.slice(offset);
+              range.setStart(node, offset - 2);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+              handleContentMutated();
+            } else if (offset >= 1 && (text[offset - 1] === ' ' || text[offset - 1] === '\u00a0')) {
+              node.textContent = text.slice(0, offset - 1) + text.slice(offset);
+              range.setStart(node, offset - 1);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+              handleContentMutated();
+            }
+          }
+          return;
+        }
+
+        // Outside list: insert 2 spaces instead of losing editor focus
         e.preventDefault();
         document.execCommand('insertText', false, '  ');
         handleContentMutated();
@@ -730,25 +1713,15 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
           const textBefore = text.slice(0, offset);
           const trimmed = textBefore.trim().replace(/\u00a0/g, ' ');
 
-          if (trimmed === '#') {
+          // # -> Heading 1-6
+          const headingMatch = trimmed.match(/^(#{1,6})$/);
+          if (headingMatch) {
             e.preventDefault();
+            const level = headingMatch[1].length;
             node.textContent = text.slice(offset);
-            document.execCommand('formatBlock', false, '<h1>');
+            document.execCommand('formatBlock', false, `<h${level}>`);
             handleContentMutated();
-            return;
-          }
-          if (trimmed === '##') {
-            e.preventDefault();
-            node.textContent = text.slice(offset);
-            document.execCommand('formatBlock', false, '<h2>');
-            handleContentMutated();
-            return;
-          }
-          if (trimmed === '###') {
-            e.preventDefault();
-            node.textContent = text.slice(offset);
-            document.execCommand('formatBlock', false, '<h3>');
-            handleContentMutated();
+            updateActiveHeading();
             return;
           }
           if (trimmed === '-' || trimmed === '*') {
@@ -756,8 +1729,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
             if (inUl) return;
             e.preventDefault();
             node.textContent = text.slice(offset);
-            document.execCommand('insertUnorderedList');
-            handleContentMutated();
+            toggleListFormat('ul');
             return;
           }
           if (trimmed === '- [ ]' || trimmed === '- [x]') {
@@ -789,34 +1761,75 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
           }
           const numMatch = trimmed.match(/^(\d+)[.)]$/);
           if (numMatch) {
-            const inOl = node.parentElement?.closest('ol');
-            if (inOl) return;
             const numVal = parseInt(numMatch[1], 10);
+            const inOl = node.parentElement?.closest('ol') as HTMLElement | null;
+
+            if (inOl && editorRef.current?.contains(inOl)) {
+              e.preventDefault();
+              node.textContent = text.slice(offset);
+
+              const currentLi = node.parentElement?.closest('li') as HTMLElement | null;
+
+              if (currentLi && inOl.contains(currentLi)) {
+                const isFirstLi = !currentLi.previousElementSibling || currentLi.previousElementSibling.tagName.toUpperCase() !== 'LI';
+                if (isFirstLi) {
+                  inOl.setAttribute('start', String(numVal));
+                } else {
+                  // Split OL from currentLi onwards
+                  const followingLis: HTMLElement[] = [currentLi];
+                  let nextSib = currentLi.nextElementSibling;
+                  while (nextSib) {
+                    if (nextSib.tagName.toUpperCase() === 'LI') followingLis.push(nextSib as HTMLElement);
+                    nextSib = nextSib.nextElementSibling;
+                  }
+                  const newOl = document.createElement('ol');
+                  newOl.style.margin = inOl.style.margin || '6px 0 6px 24px';
+                  newOl.style.padding = '0';
+                  newOl.style.fontSize = inOl.style.fontSize || '0.92rem';
+                  newOl.style.color = inOl.style.color || '#f8fafc';
+                  newOl.style.lineHeight = inOl.style.lineHeight || '1.6';
+                  newOl.style.listStyleType = 'decimal';
+                  newOl.setAttribute('start', String(numVal));
+                  followingLis.forEach((li) => newOl.appendChild(li));
+                  inOl.insertAdjacentElement('afterend', newOl);
+                }
+
+                if (!node.textContent?.trim()) {
+                  currentLi.innerHTML = '<br>';
+                  const range = document.createRange();
+                  range.setStart(currentLi, 0);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                  lastRangeRef.current = range.cloneRange();
+                } else {
+                  const range = document.createRange();
+                  range.setStart(node, 0);
+                  range.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                  lastRangeRef.current = range.cloneRange();
+                }
+
+                handleContentMutated();
+                return;
+              }
+            }
+
             e.preventDefault();
             node.textContent = text.slice(offset);
-            document.execCommand('insertOrderedList');
-            if (numVal > 1) {
-              const ol = sel?.anchorNode?.nodeType === Node.ELEMENT_NODE
-                ? (sel?.anchorNode as HTMLElement).closest('ol')
-                : sel?.anchorNode?.parentElement?.closest('ol');
-              if (ol) ol.setAttribute('start', String(numVal));
-            }
-            handleContentMutated();
+            toggleListFormat('ol', numVal);
             return;
           }
         }
       }
     }
 
-    // Enter key: Outdent empty sub-bullets before exiting
+    // Enter key: Outdent empty sub-bullets before exiting, or convert "10. Text" into <ol start="10">
     if (e.key === 'Enter') {
       const sel = window.getSelection();
       if (sel && sel.anchorNode) {
-        const currentLi = (
-          sel.anchorNode.nodeType === Node.ELEMENT_NODE
-            ? (sel.anchorNode as HTMLElement).closest('li')
-            : sel.anchorNode.parentElement?.closest('li')
-        ) as HTMLElement | null;
+        const currentLi = getActiveListItem(sel);
 
         if (currentLi && isListItemEmpty(currentLi)) {
           e.preventDefault();
@@ -829,18 +1842,88 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
           }
           return;
         }
+
+        if (!currentLi && !e.shiftKey) {
+          const currentBlock = (
+            sel.anchorNode.nodeType === Node.ELEMENT_NODE
+              ? (sel.anchorNode as HTMLElement).closest('p, div')
+              : sel.anchorNode.parentElement?.closest('p, div')
+          ) as HTMLElement | null;
+
+          if (currentBlock && editorRef.current?.contains(currentBlock)) {
+            const blockText = (currentBlock.textContent || '').replace(/[\u00a0\u200b\r\n\t]/g, ' ').trim();
+            const numMatch = blockText.match(/^(\d+)[.)]\s*(.*)$/);
+
+            if (numMatch) {
+              const numVal = parseInt(numMatch[1], 10);
+              const textAfter = numMatch[2].trim();
+
+              if (!textAfter) {
+                e.preventDefault();
+                currentBlock.innerHTML = '<br>';
+                const range = document.createRange();
+                range.setStart(currentBlock, 0);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+                lastRangeRef.current = range.cloneRange();
+                handleContentMutated();
+                return;
+              }
+
+              const range = sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+              const isAtEnd =
+                !range || (sel.anchorNode.textContent && range.startOffset >= sel.anchorNode.textContent.trimEnd().length);
+
+              if (isAtEnd) {
+                e.preventDefault();
+                const ol = document.createElement('ol');
+                ol.style.margin = '6px 0 6px 24px';
+                ol.style.padding = '0';
+                ol.style.fontSize = '0.92rem';
+                ol.style.color = '#f8fafc';
+                ol.style.lineHeight = '1.6';
+                ol.style.listStyleType = 'decimal';
+                if (numVal > 1) {
+                  ol.setAttribute('start', String(numVal));
+                }
+
+                const firstLi = document.createElement('li');
+                firstLi.style.margin = '3px 0';
+                firstLi.innerHTML = currentBlock.innerHTML.replace(/^\s*\d+[.)][\s\u00a0]*/, '');
+                if (!firstLi.textContent?.trim()) {
+                  firstLi.textContent = textAfter;
+                }
+
+                const secondLi = document.createElement('li');
+                secondLi.style.margin = '3px 0';
+                secondLi.appendChild(document.createElement('br'));
+
+                ol.appendChild(firstLi);
+                ol.appendChild(secondLi);
+
+                currentBlock.replaceWith(ol);
+
+                const newRange = document.createRange();
+                newRange.setStart(secondLi, 0);
+                newRange.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+                lastRangeRef.current = newRange.cloneRange();
+                handleContentMutated();
+                return;
+              }
+            }
+          }
+        }
       }
     }
 
-    // Backspace key: Outdent empty sub-bullets before exiting
+    // Backspace key: Outdent empty sub-bullets before exiting, or un-list root item to normal paragraph
     if (e.key === 'Backspace') {
       const sel = window.getSelection();
       if (sel && sel.anchorNode) {
-        const currentLi = (
-          sel.anchorNode.nodeType === Node.ELEMENT_NODE
-            ? (sel.anchorNode as HTMLElement).closest('li')
-            : sel.anchorNode.parentElement?.closest('li')
-        ) as HTMLElement | null;
+        const currentLi = getActiveListItem(sel);
 
         if (currentLi && isListItemEmpty(currentLi)) {
           e.preventDefault();
@@ -866,6 +1949,10 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
               if (parentLi) {
                 e.preventDefault();
                 outdentListItem(currentLi, sel);
+                return;
+              } else {
+                e.preventDefault();
+                convertListItemToParagraph(currentLi, sel);
                 return;
               }
             }
@@ -907,6 +1994,64 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
 
     if (wikiPopup.open) {
       setWikiPopup((prev) => ({ ...prev, open: false }));
+    }
+  };
+
+  // Clicking on links or checkboxes inside the detached editor
+  const handleEditorClick = (e: React.MouseEvent) => {
+    // 1. External Web Link clicked -> open in OS default browser
+    const externalLink = (e.target as HTMLElement).closest('.albaqros-external-link, a[href]');
+    if (externalLink) {
+      const href = externalLink.getAttribute('href');
+      if (href && (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('mailto:'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.openExternalUrl) {
+          (window as any).electronAPI.openExternalUrl(href);
+        } else {
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }
+        return;
+      }
+    }
+
+    // 2. Task item checkbox clicked
+    const checkbox = (e.target as HTMLElement).closest('input[type="checkbox"]');
+    if (checkbox) {
+      pushHistorySnapshot(true);
+      const taskContainer = checkbox.closest('.albaqros-task-item');
+      const textSpan = taskContainer?.querySelector('.albaqros-task-text') as HTMLElement | null;
+      const isChecked = (checkbox as HTMLInputElement).checked;
+      if (textSpan) {
+        textSpan.style.color = isChecked ? '#64748b' : '#f8fafc';
+        textSpan.style.textDecoration = isChecked ? 'line-through' : 'none';
+      }
+      handleContentMutated(false, true);
+      return;
+    }
+  };
+
+  // Double-clicking on a list item's marker allows directly changing the start number
+  const handleEditorDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    const li = target?.closest('li');
+    if (li && editorRef.current?.contains(li)) {
+      const ol = li.closest('ol');
+      if (ol) {
+        const liRect = li.getBoundingClientRect();
+        if (e.clientX <= liRect.left + 24) {
+          e.preventDefault();
+          const curStart = ol.getAttribute('start') || '1';
+          const userVal = window.prompt('Número inicial da lista:', curStart);
+          if (userVal !== null) {
+            const parsed = parseInt(userVal.trim(), 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              ol.setAttribute('start', String(parsed));
+              handleContentMutated();
+            }
+          }
+        }
+      }
     }
   };
 
@@ -1293,6 +2438,52 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
 
         {/* Right: Rich Formatting Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+          {/* Undo Button */}
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+            }}
+            onClick={handleUndo}
+            disabled={!canUndo}
+            title="Desfazer (Ctrl+Z) - até 150 passos"
+            className="btn-icon"
+            style={{
+              width: '28px',
+              height: '28px',
+              color: canUndo ? '#f8fafc' : 'rgba(255, 255, 255, 0.25)',
+              borderRadius: '5px',
+              cursor: canUndo ? 'pointer' : 'not-allowed',
+              opacity: canUndo ? 1 : 0.45,
+            }}
+          >
+            <Undo size={14} />
+          </button>
+
+          {/* Redo Button */}
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+            }}
+            onClick={handleRedo}
+            disabled={!canRedo}
+            title="Refazer (Ctrl+Shift+Z ou Ctrl+Y)"
+            className="btn-icon"
+            style={{
+              width: '28px',
+              height: '28px',
+              color: canRedo ? '#f8fafc' : 'rgba(255, 255, 255, 0.25)',
+              borderRadius: '5px',
+              cursor: canRedo ? 'pointer' : 'not-allowed',
+              opacity: canRedo ? 1 : 0.45,
+            }}
+          >
+            <Redo size={14} />
+          </button>
+
+          <div style={{ width: '1px', height: '18px', backgroundColor: 'rgba(255, 255, 255, 0.1)', margin: '0 2px' }} />
+
           <button
             type="button"
             onMouseDown={(e) => {
@@ -1300,11 +2491,9 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
               saveCurrentSelection();
             }}
             onClick={() => {
-              document.execCommand('insertOrderedList');
-              handleContentMutated();
-              editorRef.current?.focus();
+              toggleListFormat('ol');
             }}
-            title="Numbered List (1. + Space)"
+            title="Lista Numerada (digite ex: 10. + Espaço, ou clique aqui para definir número inicial)"
             className="btn-icon"
             style={{ width: '28px', height: '28px', color: '#38bdf8', borderRadius: '5px' }}
           >
@@ -1318,9 +2507,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
               saveCurrentSelection();
             }}
             onClick={() => {
-              document.execCommand('insertUnorderedList');
-              handleContentMutated();
-              editorRef.current?.focus();
+              toggleListFormat('ul');
             }}
             title="Bullet List (- + Space, Tab to indent sub-bullet)"
             className="btn-icon"
@@ -1360,7 +2547,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
                 editorRef.current.appendChild(taskItem);
               }
               editorRef.current?.focus();
-              handleContentMutated();
+              handleContentMutated(false, true);
             }}
             title="Task Checklist (- [ ] + Space)"
             className="btn-icon"
@@ -1379,7 +2566,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
             }}
             onClick={() => {
               document.execCommand('bold');
-              handleContentMutated();
+              handleContentMutated(false, true);
               editorRef.current?.focus();
             }}
             title="Bold (Ctrl+B)"
@@ -1397,7 +2584,7 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
             }}
             onClick={() => {
               document.execCommand('italic');
-              handleContentMutated();
+              handleContentMutated(false, true);
               editorRef.current?.focus();
             }}
             title="Italic (Ctrl+I)"
@@ -1450,15 +2637,35 @@ export const DetachedNoteWindow: React.FC<DetachedNoteWindowProps> = ({ notePath
           ref={editorRef}
           contentEditable
           suppressContentEditableWarning
-          onInput={handleContentMutated}
-          onBlur={flushSave}
+          onInput={() => {
+            updateActiveHeading();
+            handleContentMutated();
+          }}
+          onBlur={() => {
+            clearActiveHeading();
+            flushSave();
+          }}
+          onFocus={updateActiveHeading}
           onKeyDown={handleEditorKeyDown}
           onKeyUp={(e) => {
             saveCurrentSelection();
             handleEditorKeyUp(e);
+            updateActiveHeading();
           }}
-          onMouseUp={saveCurrentSelection}
-          onSelect={saveCurrentSelection}
+          onMouseUp={() => {
+            saveCurrentSelection();
+            updateActiveHeading();
+          }}
+          onSelect={() => {
+            saveCurrentSelection();
+            updateActiveHeading();
+          }}
+          onClick={(e) => {
+            saveCurrentSelection();
+            handleEditorClick(e);
+            updateActiveHeading();
+          }}
+          onDoubleClick={handleEditorDoubleClick}
           className="albaqros-live-editor"
           data-placeholder="Start typing... Use # for H1, ## for H2, - for bullets (Tab to indent sub-bullets), [[ to link notes"
           style={{

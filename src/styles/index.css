@@ -250,6 +250,75 @@ input:focus, textarea:focus, select:focus {
   line-height: 1.4 !important;
 }
 
+.albaqros-live-editor h4 {
+  font-size: 1.02rem !important;
+  font-weight: 600 !important;
+  color: #e2e8f0 !important;
+  margin: 12px 0 4px !important;
+  line-height: 1.45 !important;
+}
+
+.albaqros-live-editor h5 {
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  color: #cbd5e1 !important;
+  margin: 10px 0 4px !important;
+  line-height: 1.5 !important;
+}
+
+.albaqros-live-editor h6 {
+  font-size: 0.88rem !important;
+  font-weight: 600 !important;
+  color: #94a3b8 !important;
+  margin: 8px 0 4px !important;
+  line-height: 1.5 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Dynamic Markdown heading level indicator (#, ##, ###...) shown when cursor is in the heading */
+.albaqros-live-editor h1.albaqros-active-heading::before,
+.albaqros-live-editor h2.albaqros-active-heading::before,
+.albaqros-live-editor h3.albaqros-active-heading::before,
+.albaqros-live-editor h4.albaqros-active-heading::before,
+.albaqros-live-editor h5.albaqros-active-heading::before,
+.albaqros-live-editor h6.albaqros-active-heading::before {
+  color: #818cf8;
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+  opacity: 0.8;
+  margin-right: 7px;
+  user-select: none;
+  pointer-events: none;
+  display: inline-block;
+  vertical-align: baseline;
+  letter-spacing: -0.02em;
+}
+
+.albaqros-live-editor h1.albaqros-active-heading::before {
+  content: '# ';
+}
+
+.albaqros-live-editor h2.albaqros-active-heading::before {
+  content: '## ';
+}
+
+.albaqros-live-editor h3.albaqros-active-heading::before {
+  content: '### ';
+}
+
+.albaqros-live-editor h4.albaqros-active-heading::before {
+  content: '#### ';
+}
+
+.albaqros-live-editor h5.albaqros-active-heading::before {
+  content: '##### ';
+}
+
+.albaqros-live-editor h6.albaqros-active-heading::before {
+  content: '###### ';
+}
+
 .albaqros-live-editor p,
 .albaqros-live-editor div {
   font-size: 0.95rem;
@@ -288,6 +357,23 @@ input:focus, textarea:focus, select:focus {
 .albaqros-live-editor ol ol ol {
   margin: 3px 0 3px 20px;
   list-style-type: lower-roman;
+}
+
+.albaqros-live-editor ol ul {
+  margin: 3px 0 3px 0;
+  padding: 0;
+  list-style-type: disc;
+}
+
+.albaqros-live-editor ol ul ul {
+  margin: 3px 0 3px 20px;
+  list-style-type: circle;
+}
+
+.albaqros-live-editor ul ol {
+  margin: 3px 0 3px 0;
+  padding: 0;
+  list-style-type: decimal;
 }
 
 .albaqros-live-editor li {
